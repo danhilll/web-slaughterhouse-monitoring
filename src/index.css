@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, 'Segoe UI', sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
   color: #0f172a;
-  background: #f8fafc;
+  background: #f1f5f9;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
@@ -30,23 +30,47 @@ button, input, select, textarea {
   font: inherit;
 }
 
+::selection {
+  background: rgba(16, 185, 129, 0.25);
+}
+
+:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.8);
+  background: rgba(148, 163, 184, 0.7);
   border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.7);
+  background-clip: content-box;
 }
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-slate-200 bg-white shadow-soft dark:border-slate-800 dark:bg-slate-900;
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-soft transition-shadow duration-300 dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .card-hover {
+    @apply hover:-translate-y-0.5 hover:shadow-lift;
   }
 
   .input {
-    @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-emerald-500 dark:focus:ring-emerald-900/40 dark:placeholder:text-slate-500;
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:shadow-none dark:focus:border-emerald-500 dark:focus:ring-emerald-900/40 dark:hover:border-slate-600 dark:placeholder:text-slate-500;
   }
 
   .label {
@@ -54,19 +78,19 @@ button, input, select, textarea {
   }
 
   .pill {
-    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium;
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-black/5 dark:ring-white/10;
   }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100;
   }
 
   .btn-primary {
-    @apply btn bg-emerald-600 text-white shadow hover:bg-emerald-700 active:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500;
+    @apply btn bg-gradient-to-b from-emerald-500 to-emerald-700 text-white shadow-emerald hover:from-emerald-600 hover:to-emerald-800 active:from-emerald-700 active:to-emerald-900 dark:from-emerald-500 dark:to-emerald-600 dark:hover:from-emerald-400 dark:hover:to-emerald-600;
   }
 
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 active:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700;
+    @apply btn border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700;
   }
 
   .btn-danger {
@@ -82,11 +106,54 @@ button, input, select, textarea {
   }
 
   .table-head {
-    @apply bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-400;
+    @apply sticky top-0 z-10 bg-slate-50/95 text-slate-500 shadow-[0_1px_0_0_rgba(148,163,184,0.35)] backdrop-blur dark:bg-slate-800/95 dark:text-slate-400;
   }
 
   .table-row {
-    @apply border-t border-slate-200 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/50 transition;
+    @apply border-t border-slate-200/70 transition-colors duration-150 dark:border-slate-800 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20;
+  }
+
+  /* Tabular numerals for amounts, headcounts, dates */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Shimmer skeleton (replaces flat pulse blocks) */
+  .shimmer {
+    background: linear-gradient(90deg, rgba(226, 232, 240, 0.9) 25%, rgba(241, 245, 249, 0.9) 50%, rgba(226, 232, 240, 0.9) 75%);
+    background-size: 800px 100%;
+    @apply animate-shimmer;
+  }
+
+  .dark .shimmer {
+    background: linear-gradient(90deg, rgba(30, 41, 59, 0.9) 25%, rgba(51, 65, 85, 0.9) 50%, rgba(30, 41, 59, 0.9) 75%);
+    background-size: 800px 100%;
+  }
+
+  /* Recharts custom tooltip */
+  .chart-tooltip {
+    @apply rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-lift backdrop-blur dark:border-slate-700 dark:bg-slate-900/95;
+  }
+
+  /* Page + modal entrance */
+  .page-enter {
+    @apply animate-fade-up;
+  }
+
+  .modal-panel-enter {
+    @apply animate-scale-in;
+  }
+
+  .overlay-enter {
+    @apply animate-fade-in;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

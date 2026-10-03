@@ -8,12 +8,16 @@
     "dev:client": "vite --host 0.0.0.0 --port 5173",
     "dev:server": "nodemon server/index.js 5001",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "check:server": "node --check server/index.js && node --check scripts/seed-firestore.js",
+    "verify": "npm run typecheck && npm run check:server && node scripts/seed-firestore.js --dry-run && npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
     "jspdf": "^2.5.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

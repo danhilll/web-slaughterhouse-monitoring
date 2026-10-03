@@ -1,18 +1,50 @@
-rules_version='2'
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Access model (see B3/B5):
+    // - The Express API uses the Firebase Admin SDK, which bypasses these
+    //   rules entirely. It is the SOLE writer; all writes are validated in
+    //   server/index.js (B10/B11).
+    // - Direct client access (web SDK in src/firebase.js, Android SDK) is
+    //   read-only and requires a signed-in Firebase Auth user. The app runs
+    //   in demo mode with no login UI yet (B26); until Auth lands these
+    //   reads deny, which is the safe default. The moment Auth lands, reads
+    //   light up with no rule change.
+    // - Nothing here expires. The previous time-bomb rule
+    //   (allow ... if request.time < 2026-10-18) is gone.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /vendors/{vendorId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /slaughter_records/{recordId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /config/serviceFees {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // Deny everything else by default.
     match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 10, 18);
+      allow read, write: if false;
     }
   }
 }

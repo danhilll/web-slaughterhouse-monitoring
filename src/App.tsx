@@ -6,7 +6,6 @@ import {
   CreditCard,
   FileText,
   Gauge,
-  LogOut,
   Menu,
   Moon,
   PiggyBank,
@@ -15,7 +14,6 @@ import {
   ShieldCheck,
   Sun,
   TrendingUp,
-  UserRound,
   Users,
   Warehouse,
   X
@@ -41,6 +39,22 @@ import type { DashboardData, FeeConfig, Invoice, NotificationItem, SlaughterReco
 
 const COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
 
+// Themed Recharts tooltip (U3). Set `money` to format values as PHP.
+const ChartTooltip = ({ active, payload, label, money }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="chart-tooltip">
+      {label != null && <p className="mb-1 font-bold text-slate-800 dark:text-slate-100">{label}</p>}
+      {payload.map((entry: any, i: number) => (
+        <p key={i} className="tnum flex items-center gap-2 text-slate-600 dark:text-slate-300">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: entry.color || entry.payload?.fill || entry.fill }} />
+          {entry.name}: <strong className="text-slate-900 dark:text-white">{money ? formatCurrency(Number(entry.value)) : entry.value}</strong>
+        </p>
+      ))}
+    </div>
+  );
+};
+
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-PH', {
     style: 'currency',
@@ -48,13 +62,62 @@ const formatCurrency = (value: number) =>
     minimumFractionDigits: 2
   }).format(value || 0);
 
-const formatDate = (value: string) =>
-  value ? new Date(value).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : '--';
+const formatDate = (value: string) => {
+  if (!value) return '--';
+  // Business dates are YYYY-MM-DD strings; parse as LOCAL midnight so the
+  // displayed day never shifts with browser timezone (B22). Full ISO
+  // timestamps keep instant semantics.
+  const local = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value;
+  const date = new Date(local);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+};
+
+// YYYY-MM-DD for <input type="date"> defaults, from the viewer's wall clock
+// (B22) — never the UTC day, which differs near midnight.
+const todayLocal = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+// Month-bucket helpers (B22): YYYY-MM string keys bucket business dates
+// without getMonth()/getFullYear(), which shift by browser timezone.
+const currentMonthKey = () => todayLocal().slice(0, 7);
+const monthKeyOf = (dateStr: string) => (dateStr || '').slice(0, 7);
+const shiftMonthKey = (yearMonth: string, offset: number) => {
+  const [y, m] = yearMonth.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + offset, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+const monthLabelForKey = (yearMonth: string) =>
+  new Date(`${yearMonth}-01T00:00:00`).toLocaleString('en-US', { month: 'short' });
+
+// Client-side mirrors of the backend validators (B23): field errors before
+// the request instead of a round-trip 400. Backend remains authoritative.
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
+const isValidDateString = (value: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value || '') && !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
+const isNonNegativeInput = (value: unknown) => {
+  if (value === '' || value === null || value === undefined) return true;
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0;
+};
+
+const parseErrorResponse = async (response: Response, fallback: string): Promise<Error> => {
+  try {
+    const data = (await response.json()) as { message?: unknown };
+    if (typeof data.message === 'string' && data.message) return new Error(data.message);
+  } catch {
+    // Non-JSON error body (proxy/empty) — fall through to status fallback.
+  }
+  return new Error(`${fallback} (HTTP ${response.status})`);
+};
 
 const fetchJson = async <T,>(url: string): Promise<T> => {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error('Request failed');
+    throw await parseErrorResponse(response, `Request to ${url} failed`);
   }
   return response.json() as Promise<T>;
 };
@@ -69,6 +132,27 @@ const getFeeAmount = (feeConfig: FeeConfig[], id: string, fallback: number) => {
   const val = entry ? Number(entry.amount) : fallback;
   return Number.isFinite(val) && val >= 0 ? val : fallback;
 };
+
+// Single source of truth for the fee round-trip (B19): form field <->
+// backend fee id <-> fallback. Both fee consumers below AND the backend
+// (server/index.js getFeeAmounts/parseFeeInput) must use these same ids
+// and fallbacks; adding a fee means adding one row here + backend.
+const FEE_TYPES = [
+  { formKey: 'corralFee', id: 'corral_casket_fee', fallback: 15 },
+  { formKey: 'deliveryFee', id: 'delivery_fee', fallback: 25 },
+  { formKey: 'antiMortemFee', id: 'anti_mortem_fee', fallback: 10 },
+  { formKey: 'facilityFee', id: 'facility_fee', fallback: 45 }
+] as const;
+
+type FeeForm = {
+  corralFee: number;
+  deliveryFee: number;
+  antiMortemFee: number;
+  facilityFee: number;
+};
+
+const feesFromConfig = (config: FeeConfig[]): FeeForm =>
+  Object.fromEntries(FEE_TYPES.map((t) => [t.formKey, getFeeAmount(config, t.id, t.fallback)])) as FeeForm;
 
 const splitBothHeads = (total: number) => ({
   cow: Math.ceil(total / 2),
@@ -85,30 +169,44 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
+  // B20: per-section load errors. One failing endpoint no longer discards the
+  // other five responses; failed sections keep prior data and report here.
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
 
   const loadData = async () => {
     setLoading(true);
-    try {
-      const [vendorsData, recordsData, invoicesData, notificationsData, dashboardData, feeData] = await Promise.all([
-        fetchJson<Vendor[]>('/api/vendors'),
-        fetchJson<SlaughterRecord[]>('/api/slaughter-records'),
-        fetchJson<Invoice[]>('/api/invoices'),
-        fetchJson<NotificationItem[]>('/api/notifications'),
-        fetchJson<DashboardData>('/api/dashboard'),
-        fetchJson<{ fee_config: FeeConfig[] }>('/api/service-fees')
-      ]);
+    const results = await Promise.allSettled([
+      fetchJson<Vendor[]>('/api/vendors'),
+      fetchJson<SlaughterRecord[]>('/api/slaughter-records'),
+      fetchJson<Invoice[]>('/api/invoices'),
+      fetchJson<NotificationItem[]>('/api/notifications'),
+      fetchJson<DashboardData>('/api/dashboard'),
+      fetchJson<{ fee_config: FeeConfig[] }>('/api/service-fees')
+    ]);
+    const names = ['vendors', 'slaughter records', 'invoices', 'notifications', 'dashboard', 'service fees'] as const;
+    const errors: Record<string, string> = {};
+    const [vendorsRes, recordsRes, invoicesRes, notificationsRes, dashboardRes, feeRes] = results;
 
-      setVendors(vendorsData);
-      setSlaughterRecords(recordsData);
-      setInvoices(invoicesData);
-      setNotifications(notificationsData);
-      setDashboard(dashboardData);
-      setFeeConfig(feeData.fee_config);
-    } catch (error) {
-      setToast({ type: 'error', message: 'Unable to load dashboard data.' });
-    } finally {
-      setLoading(false);
+    if (vendorsRes.status === 'fulfilled') setVendors(vendorsRes.value);
+    else errors.vendors = getErrorMessage(vendorsRes.reason, 'Unable to load vendors.');
+    if (recordsRes.status === 'fulfilled') setSlaughterRecords(recordsRes.value);
+    else errors.records = getErrorMessage(recordsRes.reason, 'Unable to load slaughter records.');
+    if (invoicesRes.status === 'fulfilled') setInvoices(invoicesRes.value);
+    else errors.invoices = getErrorMessage(invoicesRes.reason, 'Unable to load invoices.');
+    if (notificationsRes.status === 'fulfilled') setNotifications(notificationsRes.value);
+    else errors.notifications = getErrorMessage(notificationsRes.reason, 'Unable to load notifications.');
+    if (dashboardRes.status === 'fulfilled') setDashboard(dashboardRes.value);
+    else errors.dashboard = getErrorMessage(dashboardRes.reason, 'Unable to load dashboard.');
+    if (feeRes.status === 'fulfilled') setFeeConfig(feeRes.value.fee_config);
+    else errors.fees = getErrorMessage(feeRes.reason, 'Unable to load service fees.');
+
+    setLoadErrors(errors);
+    const failed = Object.keys(errors);
+    if (failed.length > 0) {
+      const labels = failed.map((key) => names[['vendors', 'records', 'invoices', 'notifications', 'dashboard', 'fees'].indexOf(key)] ?? key);
+      setToast({ type: 'error', message: `Could not load: ${labels.join(', ')}. Showing available data.` });
     }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -140,14 +238,7 @@ function App() {
     setToast({ message, type });
   };
 
-  const parseError = async (response: Response, fallback: string) => {
-    try {
-      const data = await response.json();
-      return new Error(data.message || fallback);
-    } catch {
-      return new Error(fallback);
-    }
-  };
+  const parseError = async (response: Response, fallback: string) => parseErrorResponse(response, fallback);
 
   const addVendor = async (payload: Partial<Vendor>) => {
     const response = await fetch('/api/vendors', {
@@ -178,7 +269,14 @@ function App() {
   };
 
   const addRecord = async (payload: any) => {
-    const { auto_generate_invoice, number_of_heads_cow, number_of_heads_pig, ...recordFields } = payload;
+    // B17: persist the cow/pig split for 'Both' records. Previously the split
+    // was stripped here, so the stored record (and later Dashboard/Statistics
+    // volume) fell back to an even ceil/floor split instead of the real one.
+    const { auto_generate_invoice, number_of_heads_cow, number_of_heads_pig, ...rest } = payload;
+    const recordFields =
+      payload.animal_type === 'Both'
+        ? { ...rest, number_of_heads_cow, number_of_heads_pig }
+        : rest;
     const response = await fetch('/api/slaughter-records', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -282,7 +380,7 @@ function App() {
   const deleteInvoice = async (id: string) => {
     const response = await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
     if (!response.ok) {
-      throw new Error('Unable to delete invoice');
+      throw await parseError(response, 'Unable to delete invoice');
     }
     await loadData();
     showToast('Invoice deleted.');
@@ -291,7 +389,7 @@ function App() {
   const deleteRecord = async (id: string) => {
     const response = await fetch(`/api/slaughter-records/${id}`, { method: 'DELETE' });
     if (!response.ok) {
-      throw new Error('Unable to delete record');
+      throw await parseError(response, 'Unable to delete record');
     }
     await loadData();
     showToast('Record removed.');
@@ -300,7 +398,7 @@ function App() {
   const deleteVendor = async (id: string) => {
     const response = await fetch(`/api/vendors/${id}`, { method: 'DELETE' });
     if (!response.ok) {
-      throw new Error('Unable to deactivate vendor');
+      throw await parseError(response, 'Unable to deactivate vendor');
     }
     await loadData();
     showToast('Vendor marked inactive.');
@@ -382,6 +480,8 @@ function App() {
                 deleteNotification={deleteNotification}
                 updateFees={updateFees}
                 showToast={showToast}
+                loadErrors={loadErrors}
+                reloadData={loadData}
               />
             }
           />
@@ -389,7 +489,7 @@ function App() {
       </div>
 
       {toast && (
-        <div className="fixed bottom-5 right-5 z-[60] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-soft dark:border-slate-700 dark:bg-slate-900" role="status">
+        <div className="animate-fade-up fixed bottom-5 right-5 z-[60] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-lift dark:border-slate-700 dark:bg-slate-900" role="status">
           <div className={`flex items-center gap-3 ${toast.type === 'error' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
             <span className={`h-2.5 w-2.5 rounded-full ${toast.type === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`} />
             <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{toast.message}</span>
@@ -423,7 +523,9 @@ function DashboardLayout({
   markAllNotificationsRead,
   deleteNotification,
   updateFees,
-  showToast
+  showToast,
+  loadErrors,
+  reloadData
 }: any) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -476,22 +578,24 @@ function DashboardLayout({
   };
   const currentTitle = pageTitles[location.pathname] || 'Dashboard';
 
+  // B27: no dark class here — App already applies `dark` on the outer root,
+  // so a second toggle would be redundant.
   return (
-    <div className={darkMode ? 'dark' : ''}>
+    <div>
       {mobileNavOpen && <button type="button" aria-label="Close mobile navigation" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-20 bg-slate-900/50 lg:hidden" />}
-      <div className="flex min-h-screen bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100">
-        <aside className={`${mobileNavOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-30 w-72 flex-col border-r border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:static lg:flex lg:z-auto`}>
+      <div className="flex min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-emerald-50/50 text-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/20 dark:text-slate-100">
+        <aside className={`${mobileNavOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-30 w-72 flex-col border-r border-slate-200/70 bg-white/90 p-5 shadow-lift backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 lg:static lg:flex lg:z-auto`}>
           <div className="mb-8 flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 text-lg font-bold text-white">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-700 text-lg font-bold text-white shadow-emerald ring-1 ring-emerald-900/20">
               <Warehouse size={24} />
             </div>
             <div>
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">LGU Office</div>
-              <h1 className="text-lg font-bold">Slaughterhouse</h1>
+              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-400">LGU Office</div>
+              <h1 className="text-lg font-extrabold tracking-tight">Slaughterhouse</h1>
             </div>
           </div>
 
-          <nav className="space-y-2" aria-label="Primary">
+          <nav className="space-y-1.5" aria-label="Primary">
             {navItems.map(({ label, to, icon: Icon, badge }: any) => (
               <NavLink
                 key={label}
@@ -499,17 +603,17 @@ function DashboardLayout({
                 end={to === '/'}
                 onClick={() => setMobileNavOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${
+                  `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-150 ${
                     isActive
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-emerald'
+                      : 'text-slate-600 hover:translate-x-0.5 hover:bg-emerald-50 hover:text-emerald-800 dark:text-slate-300 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200'
                   }`
                 }
               >
-                <Icon size={18} />
+                <Icon size={18} className="shrink-0" />
                 <span className="flex-1">{label}</span>
                 {typeof badge === 'number' && badge > 0 && (
-                  <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
+                  <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-amber-950 shadow-sm">
                     {badge > 99 ? '99+' : badge}
                   </span>
                 )}
@@ -517,26 +621,27 @@ function DashboardLayout({
             ))}
           </nav>
 
-          <div className="mt-auto rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-300">
+          <div className="mt-auto rounded-2xl bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 p-4 text-white shadow-emerald">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-100">
               <ShieldCheck size={14} />
               Default admin
             </div>
-            <p className="font-semibold">Maria Christina Lopez</p>
-            <p className="text-sm text-slate-600 dark:text-slate-400">Municipal Treasurer</p>
+            <p className="font-bold">Maria Christina Lopez</p>
+            <p className="text-sm text-emerald-100/90">Municipal Treasurer</p>
+            <p className="mt-2 inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-inset ring-white/25">Demo mode — no sign-in</p>
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 px-4 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80 md:px-8">
+          <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/75 px-4 py-4 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:px-8">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <button type="button" aria-label="Toggle navigation" onClick={() => setMobileNavOpen((current) => !current)} className="rounded-xl border border-slate-200 p-2 lg:hidden dark:border-slate-700">
+                <button type="button" aria-label="Toggle navigation" onClick={() => setMobileNavOpen((current) => !current)} className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm lg:hidden dark:border-slate-700 dark:bg-slate-800">
                   <Menu size={18} />
                 </button>
                 <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Municipal Office</p>
-                  <h2 className="text-xl font-bold">{currentTitle}</h2>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-400">Municipal Office</p>
+                  <h2 className="text-xl font-extrabold tracking-tight md:text-2xl">{currentTitle}</h2>
                 </div>
               </div>
 
@@ -545,12 +650,12 @@ function DashboardLayout({
                   type="button"
                   aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
                   onClick={() => setDarkMode(!darkMode)}
-                  className="rounded-xl border border-slate-200 bg-slate-100 p-2 text-slate-700 transition hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  className="rounded-full border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm transition-all hover:rotate-12 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:text-amber-300"
                 >
                   {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                 </button>
-                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 font-bold text-white">M</div>
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-700 font-bold text-white shadow-emerald">M</div>
                   <div className="hidden sm:block">
                     <p className="text-sm font-semibold">Maria Christina Lopez</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">Municipal Treasurer</p>
@@ -561,12 +666,10 @@ function DashboardLayout({
                     </button>
                     {profileMenuOpen && (
                       <div className="absolute right-0 top-12 z-30 min-w-44 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                        <button type="button" onClick={() => { setProfileMenuOpen(false); showToast('Profile settings opened.'); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
-                          <UserRound size={14} /> Profile Settings
-                        </button>
-                        <button type="button" onClick={() => { setProfileMenuOpen(false); showToast('Logged out successfully.'); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
-                          <LogOut size={14} /> Logout
-                        </button>
+                        <div className="rounded-lg px-3 py-2 text-left text-sm">
+                          <p className="font-medium">Demo mode</p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Sign-in is not configured yet. Firebase Auth login UI is a separate track; until then there is no session to manage.</p>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -577,9 +680,9 @@ function DashboardLayout({
 
           <main className="p-4 md:p-8">
             <Routes>
-              <Route path="/" element={<DashboardPage loading={loading} dashboard={dashboard} />} />
+              <Route path="/" element={<DashboardPage loading={loading} dashboard={dashboard} loadError={loadErrors?.dashboard} onRetry={() => void reloadData()} />} />
               <Route path="/records" element={<SlaughterRecordsPage vendors={vendors} records={slaughterRecords} loading={loading} addRecord={addRecord} updateRecord={updateRecord} deleteRecord={deleteRecord} showToast={showToast} />} />
-              <Route path="/invoices" element={<InvoicesPage vendors={vendors} invoices={invoices} slaughterRecords={slaughterRecords} feeConfig={feeConfig} loading={loading} addInvoice={addInvoice} updateInvoice={updateInvoice} deleteInvoice={deleteInvoice} showToast={showToast} />} />
+              <Route path="/invoices" element={<InvoicesPage vendors={vendors} invoices={invoices} slaughterRecords={slaughterRecords} feeConfig={feeConfig} loading={loading} addInvoice={addInvoice} updateInvoice={updateInvoice} deleteInvoice={deleteInvoice} showToast={showToast} municipality={dashboard?.municipality} />} />
               <Route path="/statistics" element={<StatisticsPage dashboard={dashboard} recordings={slaughterRecords} invoices={invoices} />} />
               <Route path="/vendors" element={<VendorsPage vendors={vendors} records={slaughterRecords} loading={loading} addVendor={addVendor} updateVendor={updateVendor} deleteVendor={deleteVendor} showToast={showToast} />} />
               <Route path="/notifications" element={<NotificationsPage notifications={notifications} markNotificationRead={markNotificationRead} markAllNotificationsRead={markAllNotificationsRead} deleteNotification={deleteNotification} />} />
@@ -592,29 +695,42 @@ function DashboardLayout({
   );
 }
 
-function DashboardPage({ loading, dashboard }: { loading: boolean; dashboard: DashboardData | null }) {
-  if (loading || !dashboard) {
+function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: boolean; dashboard: DashboardData | null; loadError?: string; onRetry?: () => void }) {
+  if (loading && !dashboard) {
     return <LoadingDashboard />;
+  }
+  if (!dashboard) {
+    return (
+      <div className="card mx-auto max-w-md p-8 text-center">
+        <h3 className="text-lg font-bold">Dashboard unavailable</h3>
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{loadError || 'Could not load dashboard data.'}</p>
+        {onRetry && (
+          <button type="button" onClick={onRetry} className="btn-primary mt-4">
+            Retry
+          </button>
+        )}
+      </div>
+    );
   }
 
   const statCards = [
-    { title: 'Total Vendors', value: dashboard.summary.totalVendors, icon: Users, color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
-    { title: 'Slaughter Records', value: `${dashboard.summary.totalRecordsToday} today / ${dashboard.summary.totalRecordsThisMonth} month`, icon: ClipboardList, color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
-    { title: 'Total Revenue', value: formatCurrency(dashboard.summary.totalRevenueThisMonth), icon: CreditCard, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
-    { title: 'Unpaid Invoices', value: `${dashboard.summary.unpaidInvoicesCount}`, icon: FileText, color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300' }
+    { title: 'Total Vendors', value: dashboard.summary.totalVendors, icon: Users, tile: 'from-emerald-400 to-emerald-700 text-white shadow-emerald' },
+    { title: 'Slaughter Records', value: `${dashboard.summary.totalRecordsToday} today / ${dashboard.summary.totalRecordsThisMonth} month`, icon: ClipboardList, tile: 'from-amber-400 to-orange-600 text-white shadow-[0_10px_26px_rgba(245,158,11,0.35)]' },
+    { title: 'Total Revenue', value: formatCurrency(dashboard.summary.totalRevenueThisMonth), icon: CreditCard, tile: 'from-sky-400 to-blue-700 text-white shadow-[0_10px_26px_rgba(59,130,246,0.35)]' },
+    { title: 'Unpaid Invoices', value: `${dashboard.summary.unpaidInvoicesCount}`, icon: FileText, tile: 'from-rose-400 to-red-600 text-white shadow-[0_10px_26px_rgba(244,63,94,0.35)]' }
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {statCards.map((item) => (
-          <div key={item.title} className="card p-4">
+          <div key={item.title} className="card card-hover p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm text-slate-500 dark:text-slate-400">{item.title}</p>
-                <h3 className="mt-2 truncate text-2xl font-bold">{item.value}</h3>
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">{item.title}</p>
+                <h3 className="tnum mt-2 truncate text-2xl font-extrabold tracking-tight">{item.value}</h3>
               </div>
-              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${item.color}`}>
+              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${item.tile}`}>
                 <item.icon size={20} />
               </div>
             </div>
@@ -625,19 +741,34 @@ function DashboardPage({ loading, dashboard }: { loading: boolean; dashboard: Da
       <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
         <div className="card p-4 md:p-6">
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-lg font-bold">Monthly slaughter volume</h3>
-            <BarChart3 className="text-slate-400" size={18} />
+            <div>
+              <h3 className="text-lg font-extrabold tracking-tight">Monthly slaughter volume</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Headcount per month, last 6 months</p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+              <BarChart3 size={18} />
+            </div>
           </div>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dashboard.monthlySlaughterVolume}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" />
-                <YAxis allowDecimals={false} />
-                <Tooltip formatter={(value: number) => [`${value}`, 'Headcount']} />
-                <Legend />
-                <Bar dataKey="Cow" fill="#10b981" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="Pig" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+              <BarChart data={dashboard.monthlySlaughterVolume} barCategoryGap="28%">
+                <defs>
+                  <linearGradient id="barCow" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#34d399" />
+                    <stop offset="100%" stopColor="#059669" />
+                  </linearGradient>
+                  <linearGradient id="barPig" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#fbbf24" />
+                    <stop offset="100%" stopColor="#d97706" />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} tickLine={false} axisLine={{ stroke: '#cbd5e1' }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(16,185,129,0.08)' }} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Cow" fill="url(#barCow)" radius={[8, 8, 2, 2]} />
+                <Bar dataKey="Pig" fill="url(#barPig)" radius={[8, 8, 2, 2]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -645,19 +776,24 @@ function DashboardPage({ loading, dashboard }: { loading: boolean; dashboard: Da
 
         <div className="card p-4 md:p-6">
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-lg font-bold">Fee type breakdown</h3>
-            <PiggyBank className="text-slate-400" size={18} />
+            <div>
+              <h3 className="text-lg font-extrabold tracking-tight">Fee type breakdown</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Collected per fee type</p>
+            </div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+              <PiggyBank size={18} />
+            </div>
           </div>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={2}>
+                <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3} strokeWidth={2} className="outline-none">
                   {dashboard.feeBreakdown.map((entry, index) => (
-                    <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} stroke="#ffffff" strokeWidth={2} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                <Legend />
+                <Tooltip content={<ChartTooltip money />} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -666,26 +802,27 @@ function DashboardPage({ loading, dashboard }: { loading: boolean; dashboard: Da
 
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="card p-4 md:p-6">
-          <h3 className="mb-4 text-lg font-bold">Recent slaughter records</h3>
+          <h3 className="text-lg font-extrabold tracking-tight">Recent slaughter records</h3>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">Latest entries across vendors</p>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                  <th className="pb-3 pr-4 font-medium">Date</th>
-                  <th className="pb-3 pr-4 font-medium">Vendor</th>
-                  <th className="pb-3 pr-4 font-medium">Animal</th>
-                  <th className="pb-3 font-medium">Heads</th>
+                <tr className="border-b border-slate-200 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="pb-3 pr-4 font-bold">Date</th>
+                  <th className="pb-3 pr-4 font-bold">Vendor</th>
+                  <th className="pb-3 pr-4 font-bold">Animal</th>
+                  <th className="pb-3 font-bold">Heads</th>
                 </tr>
               </thead>
               <tbody>
                 {dashboard.recentSlaughterRecords.length === 0 ? (
                   <tr><td colSpan={4} className="py-6 text-center text-sm text-slate-500">No recent records.</td></tr>
                 ) : dashboard.recentSlaughterRecords.map((record) => (
-                  <tr key={record.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                    <td className="py-3 pr-4">{formatDate(record.date)}</td>
-                    <td className="py-3 pr-4">{record.vendor_name || 'N/A'}</td>
+                  <tr key={record.id} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-emerald-50/50 dark:border-slate-800 dark:hover:bg-emerald-950/20">
+                    <td className="tnum py-3 pr-4">{formatDate(record.date)}</td>
+                    <td className="py-3 pr-4 font-medium">{record.vendor_name || 'N/A'}</td>
                     <td className="py-3 pr-4">{record.animal_type}</td>
-                    <td className="py-3">{record.number_of_heads}</td>
+                    <td className="tnum py-3 font-semibold">{record.number_of_heads}</td>
                   </tr>
                 ))}
               </tbody>
@@ -694,25 +831,26 @@ function DashboardPage({ loading, dashboard }: { loading: boolean; dashboard: Da
         </div>
 
         <div className="card p-4 md:p-6">
-          <h3 className="mb-4 text-lg font-bold">Recent invoices</h3>
+          <h3 className="text-lg font-extrabold tracking-tight">Recent invoices</h3>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">Latest billing activity</p>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                  <th className="pb-3 pr-4 font-medium">Invoice</th>
-                  <th className="pb-3 pr-4 font-medium">Vendor</th>
-                  <th className="pb-3 pr-4 font-medium">Amount</th>
-                  <th className="pb-3 font-medium">Status</th>
+                <tr className="border-b border-slate-200 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="pb-3 pr-4 font-bold">Invoice</th>
+                  <th className="pb-3 pr-4 font-bold">Vendor</th>
+                  <th className="pb-3 pr-4 font-bold">Amount</th>
+                  <th className="pb-3 font-bold">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {dashboard.recentInvoices.length === 0 ? (
                   <tr><td colSpan={4} className="py-6 text-center text-sm text-slate-500">No recent invoices.</td></tr>
                 ) : dashboard.recentInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
-                    <td className="py-3 pr-4">{invoice.id}</td>
+                  <tr key={invoice.id} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-emerald-50/50 dark:border-slate-800 dark:hover:bg-emerald-950/20">
+                    <td className="tnum py-3 pr-4 font-medium">{invoice.id}</td>
                     <td className="py-3 pr-4">{invoice.vendor_name || 'N/A'}</td>
-                    <td className="py-3 pr-4">{formatCurrency(invoice.total_amount)}</td>
+                    <td className="tnum py-3 pr-4 font-semibold">{formatCurrency(invoice.total_amount)}</td>
                     <td className="py-3">
                       <span className={`pill ${invoice.payment_status === 'Paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : invoice.payment_status === 'Overdue' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}`}>
                         {invoice.payment_status}
@@ -754,7 +892,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
   const pageSize = 10;
   const [form, setForm] = useState<RecordForm>({
     vendor_id: '',
-    date: new Date().toISOString().slice(0, 10),
+    date: todayLocal(),
     animal_type: 'Cow',
     number_of_heads: 1,
     number_of_heads_cow: 1,
@@ -794,7 +932,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
     setEditingRecordId(null);
     setForm({
       vendor_id: '',
-      date: new Date().toISOString().slice(0, 10),
+      date: todayLocal(),
       animal_type: 'Cow',
       number_of_heads: 1,
       number_of_heads_cow: 1,
@@ -853,7 +991,14 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
         ? Number(form.number_of_heads_cow || 0) + Number(form.number_of_heads_pig || 0)
         : Number(form.number_of_heads || 0);
       if (!form.vendor_id) throw new Error('Please select a vendor.');
+      if (!isValidDateString(form.date)) throw new Error('Date must be YYYY-MM-DD.');
+      if (isBoth && (!isNonNegativeInput(form.number_of_heads_cow) || !isNonNegativeInput(form.number_of_heads_pig))) {
+        throw new Error('Cow and pig heads must be valid non-negative numbers.');
+      }
       if (totalHeads <= 0) throw new Error('Number of heads must be greater than zero.');
+      if (!isNonNegativeInput(form.kilograms_cow) || !isNonNegativeInput(form.kilograms_pig)) {
+        throw new Error('Kilograms must be valid non-negative numbers.');
+      }
 
       const payload = {
         vendor_id: form.vendor_id,
@@ -887,13 +1032,13 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
     if (!window.confirm('Delete this slaughter record? This cannot be undone.')) return;
     try {
       await deleteRecord(id);
-    } catch {
-      showToast('Unable to delete record.', 'error');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Unable to delete record.'), 'error');
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Slaughter Records</h2>
@@ -1103,7 +1248,8 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
   );
 }
 
-function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading, addInvoice, updateInvoice, deleteInvoice, showToast }: { vendors: Vendor[]; invoices: Invoice[]; slaughterRecords: SlaughterRecord[]; feeConfig: FeeConfig[]; loading: boolean; addInvoice: (payload: any) => Promise<void>; updateInvoice: (id: string, payload: any) => Promise<void>; deleteInvoice: (id: string) => Promise<void>; showToast: (msg: string, type?: 'success' | 'error') => void }) {
+function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading, addInvoice, updateInvoice, deleteInvoice, showToast, municipality }: { vendors: Vendor[]; invoices: Invoice[]; slaughterRecords: SlaughterRecord[]; feeConfig: FeeConfig[]; loading: boolean; addInvoice: (payload: any) => Promise<void>; updateInvoice: (id: string, payload: any) => Promise<void>; deleteInvoice: (id: string) => Promise<void>; showToast: (msg: string, type?: 'success' | 'error') => void; municipality?: string }) {
+  const municipalityName = municipality || 'San Fernando';
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [search, setSearch] = useState('');
@@ -1115,7 +1261,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
   const [form, setForm] = useState({
     vendor_id: '',
     slaughter_record_id: '',
-    date_issued: new Date().toISOString().slice(0, 10),
+    date_issued: todayLocal(),
     number_of_heads_cow: 0,
     number_of_heads_pig: 0,
     payment_status: 'Unpaid',
@@ -1123,7 +1269,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
   });
 
   const filteredInvoices = useMemo(() => {
-    const sorted = [...invoices].sort((a, b) => new Date(b.date_issued).getTime() - new Date(a.date_issued).getTime());
+    const sorted = [...invoices].sort((a, b) => b.date_issued.localeCompare(a.date_issued));
     return sorted.filter((invoice) => {
       const query = search.trim().toLowerCase();
       const byStatus = filters.status === 'All' || invoice.payment_status === filters.status;
@@ -1143,10 +1289,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
 
   const feeBreakdown = useMemo(() => {
     const totalHeads = Number(form.number_of_heads_cow || 0) + Number(form.number_of_heads_pig || 0);
-    const corralRate = getFeeAmount(feeConfig, 'corral_casket_fee', 15);
-    const deliveryRate = getFeeAmount(feeConfig, 'delivery_fee', 25);
-    const antiRate = getFeeAmount(feeConfig, 'anti_mortem_fee', 10);
-    const facilityRate = getFeeAmount(feeConfig, 'facility_fee', 45);
+    const [corralRate, deliveryRate, antiRate, facilityRate] = FEE_TYPES.map((t) => getFeeAmount(feeConfig, t.id, t.fallback));
     const corralFee = totalHeads * corralRate;
     const deliveryFee = totalHeads * deliveryRate;
     const antiMortemFee = totalHeads * antiRate;
@@ -1173,7 +1316,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
       setForm({
         vendor_id: '',
         slaughter_record_id: '',
-        date_issued: new Date().toISOString().slice(0, 10),
+        date_issued: todayLocal(),
         number_of_heads_cow: 0,
         number_of_heads_pig: 0,
         payment_status: 'Unpaid',
@@ -1207,8 +1350,8 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     try {
       await deleteInvoice(invoice.id);
       if (selectedInvoice?.id === invoice.id) setSelectedInvoice(null);
-    } catch {
-      showToast('Unable to delete invoice.', 'error');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Unable to delete invoice.'), 'error');
     } finally {
       setActioningId(null);
     }
@@ -1219,7 +1362,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     const margin = 15;
     let y = 20;
     pdf.setFontSize(12);
-    pdf.text('Municipal Government of San Fernando', margin, y);
+    pdf.text(`Municipal Government of ${municipalityName}`, margin, y);
     y += 8;
     pdf.setFontSize(16);
     pdf.setFont('helvetica', 'bold');
@@ -1260,7 +1403,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
   };
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Invoices</h2>
@@ -1384,7 +1527,14 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                     } else if (rec.animal_type === 'Pig') {
                       setForm({ ...form, slaughter_record_id: recId, vendor_id: rec.vendor_id, date_issued: rec.date, number_of_heads_cow: 0, number_of_heads_pig: Number(rec.number_of_heads || 0) });
                     } else {
-                      const split = cow != null && pig != null ? { cow: Number(cow), pig: Number(pig) } : splitBothHeads(Number(rec.number_of_heads || 0));
+                      // B24: a stored 0/0 (or non-numeric) split is NOT a real
+                      // split — fall back to the even split so the form never
+                      // prefills 0/0, which the backend would reject.
+                      const cowNum = Number(cow);
+                      const pigNum = Number(pig);
+                      const hasSplit =
+                        Number.isFinite(cowNum) && Number.isFinite(pigNum) && cowNum >= 0 && pigNum >= 0 && cowNum + pigNum > 0;
+                      const split = hasSplit ? { cow: cowNum, pig: pigNum } : splitBothHeads(Number(rec.number_of_heads || 0));
                       setForm({ ...form, slaughter_record_id: recId, vendor_id: rec.vendor_id, date_issued: rec.date, number_of_heads_cow: split.cow, number_of_heads_pig: split.pig });
                     }
                   } else {
@@ -1448,7 +1598,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
           <div className="space-y-4">
             <div className="print-area rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-800">
               <div className="text-center">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Municipal Government of San Fernando</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Municipal Government of {municipalityName}</p>
                 <h3 className="mt-2 text-xl font-bold">Official Receipt — Slaughterhouse Service Fees</h3>
               </div>
               <div className="mt-6 grid gap-3 text-sm md:grid-cols-2">
@@ -1502,26 +1652,24 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
   if (!dashboard) return <LoadingDashboard />;
 
   const revenueTrend = useMemo(() => {
+    const base = currentMonthKey();
     return Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(new Date().getFullYear(), new Date().getMonth() - 5 + index, 1);
-      const monthLabel = date.toLocaleString('en-US', { month: 'short' });
-      const monthlyTotal = invoices.filter((invoice) => {
-        const rawDate = new Date(invoice.date_issued);
-        return rawDate.getMonth() === date.getMonth() && rawDate.getFullYear() === date.getFullYear();
-      }).reduce((sum, item) => sum + Number(item.total_amount || 0), 0);
-      return { month: monthLabel, revenue: monthlyTotal };
+      const key = shiftMonthKey(base, index - 5);
+      const monthlyTotal = invoices
+        .filter((invoice) => monthKeyOf(invoice.date_issued) === key)
+        .reduce((sum, item) => sum + Number(item.total_amount || 0), 0);
+      return { month: monthLabelForKey(key), revenue: monthlyTotal };
     });
   }, [invoices]);
 
   const volumeComparison = useMemo(() => {
+    const base = currentMonthKey();
     return Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(new Date().getFullYear(), new Date().getMonth() - 5 + index, 1);
-      const monthLabel = date.toLocaleString('en-US', { month: 'short' });
+      const key = shiftMonthKey(base, index - 5);
       let cow = 0;
       let pig = 0;
       recordings.forEach((record) => {
-        const rawDate = new Date(record.date);
-        if (rawDate.getMonth() !== date.getMonth() || rawDate.getFullYear() !== date.getFullYear()) return;
+        if (monthKeyOf(record.date) !== key) return;
         const heads = Number(record.number_of_heads || 0);
         const cowSplit = Number((record as any).number_of_heads_cow ?? NaN);
         const pigSplit = Number((record as any).number_of_heads_pig ?? NaN);
@@ -1536,7 +1684,7 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
           pig += split.pig;
         }
       });
-      return { month: monthLabel, Cow: cow, Pig: pig };
+      return { month: monthLabelForKey(key), Cow: cow, Pig: pig };
     });
   }, [recordings]);
 
@@ -1549,7 +1697,7 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
   }, [recordings]);
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="card p-4 md:p-6">
           <h3 className="mb-4 text-lg font-bold">Monthly revenue</h3>
@@ -1681,6 +1829,7 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
       if (!form.name.trim()) throw new Error('Vendor name is required.');
       if (!form.contact_number.trim()) throw new Error('Contact number is required.');
       if (!form.email.trim()) throw new Error('Email is required.');
+      if (!isValidEmail(form.email)) throw new Error('Email must be a valid email address.');
       const payload = { ...form, animal_type: form.animal_type as Vendor['animal_type'] };
       if (editingVendor) {
         await updateVendor(editingVendor.id, payload);
@@ -1701,21 +1850,21 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
     if (!window.confirm(`Mark ${vendor.name} as inactive?`)) return;
     try {
       await deleteVendor(vendor.id);
-    } catch {
-      showToast('Unable to deactivate vendor.', 'error');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Unable to deactivate vendor.'), 'error');
     }
   };
 
   const handleReactivate = async (vendor: Vendor) => {
     try {
       await updateVendor(vendor.id, { status: 'Active' });
-    } catch {
-      showToast('Unable to reactivate vendor.', 'error');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Unable to reactivate vendor.'), 'error');
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Vendors</h2>
@@ -1885,7 +2034,7 @@ function NotificationsPage({ notifications, markNotificationRead, markAllNotific
   });
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Notifications {unread > 0 && <span className="pill ml-2 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{unread} unread</span>}</h2>
@@ -1933,11 +2082,11 @@ function NotificationsPage({ notifications, markNotificationRead, markAllNotific
 }
 
 function ServiceComputationPage({ feeConfig, updateFees, showToast }: { feeConfig: FeeConfig[]; updateFees: (payload: { corralFee: number; deliveryFee: number; antiMortemFee: number; facilityFee: number }) => Promise<void>; showToast: (msg: string, type?: 'success' | 'error') => void }) {
+  // B18: look fees up by stable id, never by array position — a backend
+  // reorder must not silently misprice the calculator or the reset button.
+  // (Rates come from the module-level feesFromConfig/FEE_TYPES in B19.)
   const [form, setForm] = useState({
-    corralFee: feeConfig[0]?.amount ?? 15,
-    deliveryFee: feeConfig[1]?.amount ?? 25,
-    antiMortemFee: feeConfig[2]?.amount ?? 10,
-    facilityFee: feeConfig[3]?.amount ?? 45,
+    ...feesFromConfig(feeConfig),
     cowHeads: 0,
     pigHeads: 0
   });
@@ -1946,10 +2095,7 @@ function ServiceComputationPage({ feeConfig, updateFees, showToast }: { feeConfi
   useEffect(() => {
     setForm((current) => ({
       ...current,
-      corralFee: feeConfig[0]?.amount ?? 15,
-      deliveryFee: feeConfig[1]?.amount ?? 25,
-      antiMortemFee: feeConfig[2]?.amount ?? 10,
-      facilityFee: feeConfig[3]?.amount ?? 45
+      ...feesFromConfig(feeConfig)
     }));
   }, [feeConfig]);
 
@@ -1964,7 +2110,7 @@ function ServiceComputationPage({ feeConfig, updateFees, showToast }: { feeConfi
   };
 
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Service Computation</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400">Fixed fee schedule for slaughterhouse service charges.</p>
@@ -2058,10 +2204,7 @@ function ServiceComputationPage({ feeConfig, updateFees, showToast }: { feeConfi
             <button type="button" onClick={() => {
               setForm((current) => ({
                 ...current,
-                corralFee: feeConfig[0]?.amount ?? 15,
-                deliveryFee: feeConfig[1]?.amount ?? 25,
-                antiMortemFee: feeConfig[2]?.amount ?? 10,
-                facilityFee: feeConfig[3]?.amount ?? 45
+                ...feesFromConfig(feeConfig)
               }));
             }} className="btn-secondary">Reset</button>
             <button type="submit" disabled={isSaving} className="btn-primary">{isSaving ? 'Saving…' : 'Save Fee Settings'}</button>
@@ -2075,7 +2218,7 @@ function ServiceComputationPage({ feeConfig, updateFees, showToast }: { feeConfi
 function Pagination({ page, totalPages, total, pageSize, onChange }: { page: number; totalPages: number; total: number; pageSize: number; onChange: (p: number) => void }) {
   if (total <= pageSize && totalPages <= 1) {
     return (
-      <div className="border-t border-slate-200 px-4 py-3 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+      <div className="tnum border-t border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
         Showing {total} of {total} record(s)
       </div>
     );
@@ -2083,11 +2226,11 @@ function Pagination({ page, totalPages, total, pageSize, onChange }: { page: num
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
   return (
-    <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
-      <span className="text-slate-500 dark:text-slate-400">Showing {from}–{to} of {total}</span>
+    <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/60 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-800/40">
+      <span className="tnum text-slate-500 dark:text-slate-400">Showing {from}–{to} of {total}</span>
       <div className="flex items-center gap-2">
         <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="btn-secondary btn-sm">Prev</button>
-        <span className="px-2 font-medium">Page {page} / {totalPages}</span>
+        <span className="tnum rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">Page {page} / {totalPages}</span>
         <button type="button" disabled={page >= totalPages} onClick={() => onChange(page + 1)} className="btn-secondary btn-sm">Next</button>
       </div>
     </div>
@@ -2096,15 +2239,24 @@ function Pagination({ page, totalPages, total, pageSize, onChange }: { page: num
 
 function LoadingDashboard() {
   return (
-    <div className="space-y-6">
+    <div className="page-enter space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="card h-28 animate-pulse bg-slate-200 dark:bg-slate-800" />
+          <div key={i} className="card h-28 overflow-hidden p-4">
+            <div className="shimmer h-4 w-2/3 rounded-lg" />
+            <div className="shimmer mt-3 h-8 w-1/2 rounded-lg" />
+          </div>
         ))}
       </div>
       <div className="grid gap-6 xl:grid-cols-2">
-        <div className="card h-80 animate-pulse bg-slate-200 dark:bg-slate-800" />
-        <div className="card h-80 animate-pulse bg-slate-200 dark:bg-slate-800" />
+        <div className="card h-80 overflow-hidden p-5">
+          <div className="shimmer h-5 w-1/3 rounded-lg" />
+          <div className="shimmer mt-4 h-56 rounded-xl" />
+        </div>
+        <div className="card h-80 overflow-hidden p-5">
+          <div className="shimmer h-5 w-1/3 rounded-lg" />
+          <div className="shimmer mt-4 h-56 rounded-xl" />
+        </div>
       </div>
     </div>
   );
@@ -2114,7 +2266,7 @@ function TableSkeleton() {
   return (
     <div className="space-y-3 p-4">
       {[...Array(6)].map((_, i) => (
-        <div key={i} className="h-12 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
+        <div key={i} className="shimmer h-12 rounded-xl" />
       ))}
     </div>
   );
@@ -2123,7 +2275,7 @@ function TableSkeleton() {
 function EmptyState({ title, message }: { title: string; message: string }) {
   return (
     <div className="flex min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
-      <div className="rounded-full bg-slate-100 p-3 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+      <div className="rounded-2xl bg-gradient-to-br from-emerald-100 to-teal-100 p-4 text-emerald-700 dark:from-emerald-900/50 dark:to-teal-900/50 dark:text-emerald-300">
         <BarChart3 size={22} />
       </div>
       <h3 className="text-lg font-bold">{title}</h3>
@@ -2147,10 +2299,13 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-      <button type="button" aria-label="Close dialog" onClick={onClose} className="absolute inset-0 bg-slate-900/50" />
-      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 dark:border dark:border-slate-700">
-        <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-700">
-          <h3 className="text-xl font-bold">{title}</h3>
+      <button type="button" aria-label="Close dialog" onClick={onClose} className="overlay-enter absolute inset-0 bg-slate-950/55 backdrop-blur-sm" />
+      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="modal-panel-enter relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl border border-slate-200/70 bg-white p-5 shadow-lift dark:border-slate-700 dark:bg-slate-900 md:p-6">
+        <div className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200/70 pb-4 dark:border-slate-700/70">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-1.5 rounded-full bg-gradient-to-b from-emerald-400 to-emerald-700" />
+            <h3 className="text-xl font-extrabold tracking-tight">{title}</h3>
+          </div>
           <button type="button" onClick={onClose} aria-label="Close" className="btn-secondary btn-sm">
             <X size={14} /> Close
           </button>
