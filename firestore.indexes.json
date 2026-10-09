@@ -1,12 +1,4 @@
 {
-  // Single-field indexes (date, date_issued, vendor_id, payment_status,
-  // created_at) are automatic in Firestore and NOT listed here.
-  // Only the composite indexes below need declaring. They cover the B3
-  // query map: vendor + date listings, status + date invoice queues, and
-  // the recent-first sorts used by Dashboard/Statistics. The Express store
-  // (B5) currently reads whole collections, so nothing requires these yet;
-  // they deploy ahead so filtered queries (web or Android direct reads)
-  // never hit a missing-index error in production.
   "indexes": [
     {
       "collectionGroup": "slaughter_records",

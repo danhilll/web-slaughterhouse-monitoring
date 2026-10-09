@@ -2,5 +2,11 @@ node_modules
 dist
 .vite
 .env
+.env.*
+!.env.example
+.firestore-rule-analysis.local.md
+.firestore-rules-backup.local.json
+*firebase-adminsdk*.json
+*service-account*.json
 .DS_Store
 npm-debug.log*

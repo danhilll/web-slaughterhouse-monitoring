@@ -1,7 +1,8 @@
-// One-time Firestore seed migration (B6).
+// Demo fixture seed for an isolated test project. Never use on the shared
+// com-slaughterhouse-app project while its mobile/web data models differ.
 // Usage:
 //   node scripts/seed-firestore.js --dry-run   (default; no credentials needed)
-//   node scripts/seed-firestore.js --live       (writes seeds; needs FIREBASE_* env)
+//   node scripts/seed-firestore.js --live       (test project only; needs FIREBASE_* env)
 //   node scripts/seed-firestore.js --live --overwrite
 //
 // Seeds mirror server/index.js seed data with STABLE IDs (VEN-1001, SR-2001,
@@ -103,9 +104,18 @@ const plan = [
 console.log(`Seed validation OK: ${seeds.vendors.length} vendors, ${seeds.slaughter_records.length} records, ${seeds.invoices.length} invoices, ${seeds.notifications.length} notifications, 4 fees.`);
 
 if (DRY_RUN) {
-  console.log(`DRY-RUN: would write ${plan.length} docs (use --live to write${OVERWRITE ? '' : ', existing docs skipped unless --overwrite'}).`);
+  console.log(`DRY-RUN: would write ${plan.length} demo docs to an isolated test project. Live seeding is blocked for the shared project.`);
   plan.forEach(([c, id]) => console.log(`  ${c}/${id}`));
   process.exit(0);
+}
+
+if (!process.env.FIREBASE_PROJECT_ID) {
+  console.error('LIVE mode requires an explicit FIREBASE_PROJECT_ID for an isolated test project. Nothing written.');
+  process.exit(1);
+}
+if (process.env.FIREBASE_PROJECT_ID === 'com-slaughterhouse-app') {
+  console.error('Refusing to seed demo fixtures into the shared Firebase project. Nothing written.');
+  process.exit(1);
 }
 
 const hasCreds =
@@ -116,21 +126,20 @@ if (!hasCreds) {
   process.exit(1);
 }
 
-const admin = (await import('firebase-admin')).default;
-if (admin.apps.length === 0) {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: process.env.FIREBASE_PROJECT_ID });
-  } else {
-    admin.initializeApp({
-      credential: admin.credential.cert({
+const { applicationDefault, cert, getApps, initializeApp } = await import('firebase-admin/app');
+const { getFirestore } = await import('firebase-admin/firestore');
+let firebaseApp = getApps()[0];
+if (!firebaseApp) {
+  const credential = process.env.GOOGLE_APPLICATION_CREDENTIALS
+    ? applicationDefault()
+    : cert({
         projectId: process.env.FIREBASE_PROJECT_ID,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
         privateKey: String(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, '\n')
-      })
-    });
-  }
+      });
+  firebaseApp = initializeApp({ credential, projectId: process.env.FIREBASE_PROJECT_ID });
 }
-const db = admin.firestore();
+const db = getFirestore(firebaseApp);
 let written = 0;
 let skipped = 0;
 

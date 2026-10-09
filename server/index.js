@@ -1,10 +1,20 @@
 import express from 'express';
 import cors from 'cors';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createWebAdminMiddleware, createWriteGuard, parseAdminUids } from './access.js';
+
+const envPath = fileURLToPath(new URL('../.env', import.meta.url));
+if (existsSync(envPath)) process.loadEnvFile(envPath);
 
 const app = express();
 const requestedPort = Number(process.argv[2] || process.env.PORT || 5000);
 const PORT = Number.isFinite(requestedPort) ? requestedPort : 5000;
 const MUNICIPALITY = 'San Fernando';
+const WEB_ADMIN_UIDS = parseAdminUids(process.env.WEB_ADMIN_UIDS);
+// The live project currently has only `Users`; web collections are not mapped
+// to mobile data yet. Keep mutation routes closed until that mapping is built.
+const WEB_WRITES_ENABLED = false;
 
 // Collision-free prefixed IDs (B9). Timestamp (base36, ~monotonic) + 5 random
 // chars: unique under same-ms double-clicks, no new dependency, and prefixed
@@ -45,21 +55,19 @@ const applyLimit = (list, req, res) => {
   return { list: list.slice(0, limit), error: null };
 };
 
-// CORS (B15): open in local dev (same as before). Set CORS_ORIGIN to a
-// comma-separated allowlist in production, e.g.
+// Same-origin requests need no CORS headers. Set CORS_ORIGIN only when the
+// frontend and API use separate origins, e.g.
 // CORS_ORIGIN=https://your-app.web.app,https://your-office.gov.ph
 const corsOrigins = String(process.env.CORS_ORIGIN || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
-app.use(corsOrigins.length > 0 ? cors({ origin: corsOrigins }) : cors());
-app.use(express.json());
+if (corsOrigins.length > 0) app.use(cors({ origin: corsOrigins }));
 
 // ---------------------------------------------------------------------------
-// Persistence: Firestore (via firebase-admin) when service credentials are
-// present, otherwise the original in-memory seed dataset (local development).
-// Set FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY
-// (or GOOGLE_APPLICATION_CREDENTIALS) to enable Firestore mode.
+// Persistence: the API requires Firestore via Firebase Admin. The legacy
+// in-memory data below is retained for local fixtures, but startup fails if
+// Firestore cannot be reached.
 // ---------------------------------------------------------------------------
 const COLLECTIONS = {
   vendors: 'vendors',
@@ -142,6 +150,8 @@ const seedSlaughterRecords = [
     date: '2026-09-01',
     animal_type: 'Both',
     number_of_heads: 18,
+    number_of_heads_cow: 10,
+    number_of_heads_pig: 8,
     meat_type_to_deliver: 'Whole',
     livestock_type: 'Imported',
     kilograms_cow: 300,
@@ -251,41 +261,39 @@ const memory = {
 
 let firestoreDb = null;
 let useFirestore = false;
-
-const hasServiceCredentials = () => {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
-  return Boolean(
-    process.env.FIREBASE_PROJECT_ID &&
-    process.env.FIREBASE_CLIENT_EMAIL &&
-    process.env.FIREBASE_PRIVATE_KEY
-  );
-};
+let firebaseAuth = null;
 
 const initFirestore = async () => {
-  if (!hasServiceCredentials()) return false;
+  if (!process.env.FIREBASE_PROJECT_ID) return false;
+  const hasInlineCredential = Boolean(process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY);
+  if (!hasInlineCredential && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    console.error('[api] Set GOOGLE_APPLICATION_CREDENTIALS or FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY for local Firestore access.');
+    return false;
+  }
   try {
-    const admin = (await import('firebase-admin')).default;
-    if (admin.apps.length === 0) {
-      if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-        admin.initializeApp({
-          credential: admin.credential.applicationDefault(),
-          projectId: process.env.FIREBASE_PROJECT_ID
-        });
-      } else {
-        admin.initializeApp({
-          credential: admin.credential.cert({
+    const { applicationDefault, cert, getApps, initializeApp } = await import('firebase-admin/app');
+    const { getFirestore } = await import('firebase-admin/firestore');
+    const { getAuth } = await import('firebase-admin/auth');
+    let firebaseApp = getApps()[0];
+    if (!firebaseApp) {
+      const credential = hasInlineCredential
+        ? cert({
             projectId: process.env.FIREBASE_PROJECT_ID,
             clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
             privateKey: String(process.env.FIREBASE_PRIVATE_KEY).replace(/\\n/g, '\n')
           })
-        });
-      }
+        : applicationDefault();
+      firebaseApp = initializeApp({ credential, projectId: process.env.FIREBASE_PROJECT_ID });
     }
-    firestoreDb = admin.firestore();
+    firestoreDb = getFirestore(firebaseApp);
+    firebaseAuth = getAuth(firebaseApp);
+    // Verify the database is reachable before accepting any API requests.
+    await firestoreDb.doc(SERVICE_FEES_DOC).get();
     return true;
   } catch (error) {
-    console.warn('[api] Firestore init failed, using in-memory store:', error?.message || error);
+    console.error('[api] Firestore initialization failed:', error?.message || error);
     firestoreDb = null;
+    firebaseAuth = null;
     return false;
   }
 };
@@ -294,13 +302,18 @@ const docData = (doc) => ({ id: doc.id, ...doc.data() });
 
 // --- Store: identical async interface for both backends --------------------
 const store = {
-  async listFees() {
+  async getFees() {
     if (useFirestore) {
       const snap = await firestoreDb.doc(SERVICE_FEES_DOC).get();
-      if (snap.exists && Array.isArray(snap.data().fees)) return snap.data().fees;
-      return JSON.parse(JSON.stringify(seedFeeConfig));
+      if (snap.exists && Array.isArray(snap.data().fees)) {
+        return { fees: snap.data().fees, configured: true };
+      }
+      return { fees: JSON.parse(JSON.stringify(seedFeeConfig)), configured: false };
     }
-    return memory.feeConfig;
+    return { fees: memory.feeConfig, configured: false };
+  },
+  async listFees() {
+    return (await store.getFees()).fees;
   },
   async saveFees(fees) {
     if (useFirestore) {
@@ -652,6 +665,18 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res)).catch(next);
 };
 
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
+app.use('/api', createWriteGuard(WEB_WRITES_ENABLED));
+app.use('/api', express.json({ limit: '64kb' }));
+
+app.get('/api/session', (req, res) => {
+  res.json({ ...req.webUser, writesEnabled: WEB_WRITES_ENABLED });
+});
+
 app.get('/api/dashboard', asyncHandler(async (req, res) => {
   res.json(await buildDashboard());
 }));
@@ -753,6 +778,19 @@ app.post('/api/slaughter-records', asyncHandler(async (req, res) => {
   if (record.status !== undefined && !RECORD_STATUSES.includes(record.status)) {
     return res.status(400).json({ message: 'Invalid record status.' });
   }
+  if (record.animal_type === 'Both') {
+    if (record.number_of_heads_cow == null || record.number_of_heads_pig == null) {
+      return res.status(400).json({ message: 'Both animal records require cow and pig headcounts.' });
+    }
+    const cow = Number(record.number_of_heads_cow);
+    const pig = Number(record.number_of_heads_pig);
+    if (!Number.isInteger(cow) || !Number.isInteger(pig) || cow < 0 || pig < 0) {
+      return res.status(400).json({ message: 'Cow and pig heads must be valid non-negative integers.' });
+    }
+    if (cow + pig !== heads) {
+      return res.status(400).json({ message: 'Cow + pig heads must equal total number of heads.' });
+    }
+  }
 
   const newRecord = {
     id: newId('SR'),
@@ -760,8 +798,10 @@ app.post('/api/slaughter-records', asyncHandler(async (req, res) => {
     date: record.date,
     animal_type: record.animal_type,
     number_of_heads: heads,
-    number_of_heads_cow: record.number_of_heads_cow != null ? Number(record.number_of_heads_cow) : undefined,
-    number_of_heads_pig: record.number_of_heads_pig != null ? Number(record.number_of_heads_pig) : undefined,
+    ...(record.animal_type === 'Both' ? {
+      number_of_heads_cow: Number(record.number_of_heads_cow),
+      number_of_heads_pig: Number(record.number_of_heads_pig)
+    } : {}),
     meat_type_to_deliver: record.meat_type_to_deliver || 'Dressed',
     livestock_type: record.livestock_type || 'Native',
     kilograms_cow: record.kilograms_cow ?? null,
@@ -807,6 +847,26 @@ app.patch('/api/slaughter-records/:id', asyncHandler(async (req, res) => {
   }
   if (patch.status !== undefined && !RECORD_STATUSES.includes(patch.status)) {
     return res.status(400).json({ message: 'Invalid record status.' });
+  }
+  const existing = await store.getRecord(req.params.id);
+  if (!existing) return res.status(404).json({ message: 'Record not found.' });
+  const effectiveAnimal = patch.animal_type !== undefined ? patch.animal_type : existing.animal_type;
+  const effectiveHeads = patch.number_of_heads !== undefined ? patch.number_of_heads : existing.number_of_heads;
+  const effectiveCow = patch.number_of_heads_cow !== undefined ? patch.number_of_heads_cow : existing.number_of_heads_cow;
+  const effectivePig = patch.number_of_heads_pig !== undefined ? patch.number_of_heads_pig : existing.number_of_heads_pig;
+  if (effectiveAnimal === 'Both') {
+    if (effectiveCow == null || effectivePig == null) {
+      return res.status(400).json({ message: 'Both animal records require cow and pig headcounts.' });
+    }
+    const cow = Number(effectiveCow);
+    const pig = Number(effectivePig);
+    const total = Number(effectiveHeads);
+    if (!Number.isInteger(cow) || !Number.isInteger(pig) || cow < 0 || pig < 0) {
+      return res.status(400).json({ message: 'Cow and pig heads must be valid non-negative integers.' });
+    }
+    if (Number.isFinite(total) && cow + pig !== total) {
+      return res.status(400).json({ message: 'Cow + pig heads must equal total number of heads.' });
+    }
   }
 
   const record = await store.updateRecord(req.params.id, patch);
@@ -925,8 +985,8 @@ app.patch('/api/notifications/mark-all-read', asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/service-fees', asyncHandler(async (req, res) => {
-  const feeConfig = await store.listFees();
-  res.json({ municipality: MUNICIPALITY, fee_config: feeConfig, total_per_head: await totalPerHead() });
+  const { fees, configured } = await store.getFees();
+  res.json({ municipality: MUNICIPALITY, fee_config: fees, configured, total_per_head: await totalPerHead() });
 }));
 
 const parseFeeInput = (value, fallback) => {
@@ -1013,9 +1073,9 @@ app.delete('/api/notifications/:id', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
-// Health check (B15): load balancers / uptime monitors / mobile clients.
+// Admin-only health check.
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, store: useFirestore ? 'firestore' : 'memory', time: new Date().toISOString() });
+  res.json({ ok: true, store: 'firestore', time: new Date().toISOString() });
 });
 
 // JSON 404s (B15): unknown API routes return { message }, not Express HTML,
@@ -1029,15 +1089,20 @@ app.use('/api', (req, res) => {
 app.use((err, req, res, next) => {
   console.error('[api] Unhandled error:', err?.message || err);
   if (res.headersSent) return next(err);
+  if (err?.status === 413) return res.status(413).json({ message: 'Request body is too large.' });
+  if (err?.status === 400) return res.status(400).json({ message: 'Invalid request body.' });
   res.status(500).json({ message: 'Internal server error.' });
 });
 
 const start = async () => {
+  if (WEB_ADMIN_UIDS.size === 0) throw new Error('WEB_ADMIN_UIDS must list at least one Firebase Authentication UID.');
+  if (process.env.VITE_FIREBASE_PROJECT_ID && process.env.VITE_FIREBASE_PROJECT_ID !== process.env.FIREBASE_PROJECT_ID) {
+    throw new Error('VITE_FIREBASE_PROJECT_ID must match FIREBASE_PROJECT_ID.');
+  }
   useFirestore = await initFirestore();
+  if (!useFirestore) throw new Error('Firestore is required. Set FIREBASE_PROJECT_ID and valid Admin SDK credentials.');
   console.log(
-    useFirestore
-      ? 'Municipal slaughterhouse API is running on http://localhost:' + PORT + ' [Firestore: ' + (process.env.FIREBASE_PROJECT_ID || 'application-default') + ']'
-      : 'Municipal slaughterhouse API is running on http://localhost:' + PORT + ' [in-memory store; set FIREBASE_* env vars for Firestore]'
+    'Municipal slaughterhouse API is running on http://localhost:' + PORT + ' [Firestore: ' + process.env.FIREBASE_PROJECT_ID + ']'
   );
   app.listen(PORT);
 };
@@ -1058,4 +1123,7 @@ store.updateNotificationRead = async (id) => {
   return notification;
 };
 
-start();
+start().catch((error) => {
+  console.error('[api] Startup failed:', error?.message || error);
+  process.exitCode = 1;
+});

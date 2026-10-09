@@ -36,6 +36,8 @@ import {
 } from 'recharts';
 import { jsPDF } from 'jspdf';
 import type { DashboardData, FeeConfig, Invoice, NotificationItem, SlaughterRecord, Vendor } from './types';
+import type { WebSession } from './AuthGate';
+import { apiFetch } from './api';
 
 const COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
 
@@ -115,7 +117,7 @@ const parseErrorResponse = async (response: Response, fallback: string): Promise
 };
 
 const fetchJson = async <T,>(url: string): Promise<T> => {
-  const response = await fetch(url);
+  const response = await apiFetch(url);
   if (!response.ok) {
     throw await parseErrorResponse(response, `Request to ${url} failed`);
   }
@@ -159,13 +161,14 @@ const splitBothHeads = (total: number) => ({
   pig: Math.floor(total / 2)
 });
 
-function App() {
+function App({ session, onLogout }: { session: WebSession; onLogout: () => Promise<void> }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [slaughterRecords, setSlaughterRecords] = useState<SlaughterRecord[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [feeConfig, setFeeConfig] = useState<FeeConfig[]>([]);
+  const [feesConfigured, setFeesConfigured] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [darkMode, setDarkMode] = useState(false);
@@ -181,7 +184,7 @@ function App() {
       fetchJson<Invoice[]>('/api/invoices'),
       fetchJson<NotificationItem[]>('/api/notifications'),
       fetchJson<DashboardData>('/api/dashboard'),
-      fetchJson<{ fee_config: FeeConfig[] }>('/api/service-fees')
+      fetchJson<{ fee_config: FeeConfig[]; configured: boolean }>('/api/service-fees')
     ]);
     const names = ['vendors', 'slaughter records', 'invoices', 'notifications', 'dashboard', 'service fees'] as const;
     const errors: Record<string, string> = {};
@@ -197,8 +200,13 @@ function App() {
     else errors.notifications = getErrorMessage(notificationsRes.reason, 'Unable to load notifications.');
     if (dashboardRes.status === 'fulfilled') setDashboard(dashboardRes.value);
     else errors.dashboard = getErrorMessage(dashboardRes.reason, 'Unable to load dashboard.');
-    if (feeRes.status === 'fulfilled') setFeeConfig(feeRes.value.fee_config);
-    else errors.fees = getErrorMessage(feeRes.reason, 'Unable to load service fees.');
+    if (feeRes.status === 'fulfilled') {
+      setFeeConfig(feeRes.value.fee_config);
+      setFeesConfigured(feeRes.value.configured);
+    } else {
+      setFeesConfigured(null);
+      errors.fees = getErrorMessage(feeRes.reason, 'Unable to load service fees.');
+    }
 
     setLoadErrors(errors);
     const failed = Object.keys(errors);
@@ -241,7 +249,7 @@ function App() {
   const parseError = async (response: Response, fallback: string) => parseErrorResponse(response, fallback);
 
   const addVendor = async (payload: Partial<Vendor>) => {
-    const response = await fetch('/api/vendors', {
+    const response = await apiFetch('/api/vendors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -256,7 +264,7 @@ function App() {
   };
 
   const updateVendor = async (id: string, payload: Partial<Vendor>) => {
-    const response = await fetch(`/api/vendors/${id}`, {
+    const response = await apiFetch(`/api/vendors/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -277,7 +285,7 @@ function App() {
       payload.animal_type === 'Both'
         ? { ...rest, number_of_heads_cow, number_of_heads_pig }
         : rest;
-    const response = await fetch('/api/slaughter-records', {
+    const response = await apiFetch('/api/slaughter-records', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(recordFields)
@@ -319,7 +327,7 @@ function App() {
         notes: 'Auto-generated from slaughter record.'
       };
 
-      const invRes = await fetch('/api/invoices', {
+      const invRes = await apiFetch('/api/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(invoicePayload)
@@ -335,7 +343,7 @@ function App() {
 
   const updateRecord = async (id: string, payload: any) => {
     const { auto_generate_invoice: _ignored, ...clean } = payload;
-    const response = await fetch(`/api/slaughter-records/${id}`, {
+    const response = await apiFetch(`/api/slaughter-records/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(clean)
@@ -350,7 +358,7 @@ function App() {
   };
 
   const addInvoice = async (payload: any) => {
-    const response = await fetch('/api/invoices', {
+    const response = await apiFetch('/api/invoices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -365,7 +373,7 @@ function App() {
   };
 
   const updateInvoice = async (id: string, payload: any) => {
-    const response = await fetch(`/api/invoices/${id}`, {
+    const response = await apiFetch(`/api/invoices/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -378,7 +386,7 @@ function App() {
   };
 
   const deleteInvoice = async (id: string) => {
-    const response = await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/invoices/${id}`, { method: 'DELETE' });
     if (!response.ok) {
       throw await parseError(response, 'Unable to delete invoice');
     }
@@ -387,7 +395,7 @@ function App() {
   };
 
   const deleteRecord = async (id: string) => {
-    const response = await fetch(`/api/slaughter-records/${id}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/slaughter-records/${id}`, { method: 'DELETE' });
     if (!response.ok) {
       throw await parseError(response, 'Unable to delete record');
     }
@@ -396,7 +404,7 @@ function App() {
   };
 
   const deleteVendor = async (id: string) => {
-    const response = await fetch(`/api/vendors/${id}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/vendors/${id}`, { method: 'DELETE' });
     if (!response.ok) {
       throw await parseError(response, 'Unable to deactivate vendor');
     }
@@ -405,14 +413,14 @@ function App() {
   };
 
   const markNotificationRead = async (id: string) => {
-    const response = await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+    const response = await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
     if (!response.ok) return;
     const next = notifications.map((item) => (item.id === id ? { ...item, is_read: true } : item));
     setNotifications(next);
   };
 
   const markAllNotificationsRead = async () => {
-    const response = await fetch('/api/notifications/mark-all-read', { method: 'PATCH' });
+    const response = await apiFetch('/api/notifications/mark-all-read', { method: 'PATCH' });
     if (!response.ok) {
       showToast('Unable to update notifications.', 'error');
       return;
@@ -422,7 +430,7 @@ function App() {
   };
 
   const deleteNotification = async (id: string) => {
-    const response = await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
     if (!response.ok) {
       showToast('Unable to delete notification.', 'error');
       return;
@@ -432,7 +440,7 @@ function App() {
   };
 
   const updateFees = async (payload: { corralFee: number; deliveryFee: number; antiMortemFee: number; facilityFee: number }) => {
-    const response = await fetch('/api/service-fees', {
+    const response = await apiFetch('/api/service-fees', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -444,6 +452,7 @@ function App() {
 
     const data = await response.json();
     setFeeConfig(data.fee_config);
+    setFeesConfigured(true);
     showToast('Service fees updated.');
   };
 
@@ -451,12 +460,24 @@ function App() {
 
   return (
     <div className={appRootClass}>
+      {!session.writesEnabled && (
+        <div role="status" className="border-b border-amber-300 bg-amber-100 px-4 py-3 text-center text-sm font-medium text-amber-950">
+          Viewing the shared Firebase project. Web changes are paused while mobile and web records are connected.
+        </div>
+      )}
+      {feesConfigured === false && (
+        <div role="status" className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-950">
+          No approved fee schedule is stored in Firestore. Displayed fee amounts are sample defaults and must not be used for billing.
+        </div>
+      )}
       <div className="min-h-screen">
         <Routes>
           <Route
             path="/*"
             element={
               <DashboardLayout
+                session={session}
+                onLogout={onLogout}
                 loading={loading}
                 darkMode={darkMode}
                 setDarkMode={setDarkMode}
@@ -501,6 +522,8 @@ function App() {
 }
 
 function DashboardLayout({
+  session,
+  onLogout,
   loading,
   darkMode,
   setDarkMode,
@@ -624,11 +647,11 @@ function DashboardLayout({
           <div className="mt-auto rounded-2xl bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 p-4 text-white shadow-emerald">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-100">
               <ShieldCheck size={14} />
-              Default admin
+              Web administrator
             </div>
-            <p className="font-bold">Maria Christina Lopez</p>
-            <p className="text-sm text-emerald-100/90">Municipal Treasurer</p>
-            <p className="mt-2 inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-inset ring-white/25">Demo mode — no sign-in</p>
+            <p className="break-all font-bold">{session.email || session.uid}</p>
+            <p className="text-sm text-emerald-100/90">Administrator</p>
+            <p className="mt-2 inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-inset ring-white/25">Signed in</p>
           </div>
         </aside>
 
@@ -655,10 +678,10 @@ function DashboardLayout({
                   {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                 </button>
                 <div className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-700 font-bold text-white shadow-emerald">M</div>
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-700 font-bold text-white shadow-emerald">{(session.email || 'A')[0].toUpperCase()}</div>
                   <div className="hidden sm:block">
-                    <p className="text-sm font-semibold">Maria Christina Lopez</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Municipal Treasurer</p>
+                    <p className="text-sm font-semibold">{session.email || session.uid}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Web administrator</p>
                   </div>
                   <div className="relative" ref={profileRef}>
                     <button type="button" aria-label="Profile menu" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((current) => !current)} className="rounded-lg p-2 hover:bg-slate-200 dark:hover:bg-slate-700">
@@ -667,8 +690,9 @@ function DashboardLayout({
                     {profileMenuOpen && (
                       <div className="absolute right-0 top-12 z-30 min-w-44 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
                         <div className="rounded-lg px-3 py-2 text-left text-sm">
-                          <p className="font-medium">Demo mode</p>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Sign-in is not configured yet. Firebase Auth login UI is a separate track; until then there is no session to manage.</p>
+                          <p className="font-medium">Signed in</p>
+                          <p className="mt-1 break-all text-xs text-slate-500 dark:text-slate-400">{session.email || session.uid}</p>
+                          <button type="button" onClick={() => void onLogout()} className="btn-ghost mt-2 w-full">Sign out</button>
                         </div>
                       </div>
                     )}

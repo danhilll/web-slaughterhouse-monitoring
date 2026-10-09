@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": { "node": ">=22" },
   "scripts": {
     "dev": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
     "dev:client": "vite --host 0.0.0.0 --port 5173",
@@ -10,8 +11,11 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "check:server": "node --check server/index.js && node --check scripts/seed-firestore.js",
-    "verify": "npm run typecheck && npm run check:server && node scripts/seed-firestore.js --dry-run && npm run build"
+    "check:server": "node --check server/index.js && node --check server/access.js && node --check scripts/seed-firestore.js && node --check scripts/check-firebase-connection.js && node --check scripts/inspect-firestore-shape.js && node --check scripts/publish-firestore-lockdown.js && node --check scripts/check-firestore-lockdown.js",
+    "check:firebase": "node scripts/check-firebase-connection.js",
+    "inspect:firestore": "node scripts/inspect-firestore-shape.js",
+    "test:server": "node --test server/*.test.js",
+    "verify": "npm run typecheck && npm run check:server && npm run test:server && node scripts/seed-firestore.js --dry-run && npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",
