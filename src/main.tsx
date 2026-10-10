@@ -8,9 +8,9 @@ import './index.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <WorkspaceMotion>
-    <BrowserRouter>
-      <AuthGate />
-    </BrowserRouter>
+      <BrowserRouter>
+        <AuthGate />
+      </BrowserRouter>
     </WorkspaceMotion>
   </React.StrictMode>
 );

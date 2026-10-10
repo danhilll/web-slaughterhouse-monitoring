@@ -1,0 +1,50 @@
+[debug] [2026-10-10T17:21:07.190Z] ----------------------------------------------------------------------
+[debug] [2026-10-10T17:21:07.195Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Acer\AppData\Local\npm-cache\_npx\ba4f1959e38407b5\node_modules\firebase-tools\lib\bin\firebase.js projects:list --json
+[debug] [2026-10-10T17:21:07.196Z] CLI Version:   15.33.0
+[debug] [2026-10-10T17:21:07.196Z] Platform:      win32
+[debug] [2026-10-10T17:21:07.196Z] Node Version:  v24.14.0
+[debug] [2026-10-10T17:21:07.197Z] Detected Agent: codex_cli
+[debug] [2026-10-10T17:21:07.197Z] Time:          Sun Oct 11 2026 01:21:07 GMT+0800 (Philippine Standard Time)
+[debug] [2026-10-10T17:21:07.197Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-10T17:21:07.708Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-10T17:21:07.709Z] > authorizing via signed-in user (viannoscal@gmail.com)
+[debug] [2026-10-10T17:21:07.744Z] Checked if tokens are valid: true, expires at: 1791656071233
+[debug] [2026-10-10T17:21:07.745Z] Checked if tokens are valid: true, expires at: 1791656071233
+[debug] [2026-10-10T17:21:07.748Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2026-10-10T17:21:08.442Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-10-10T17:21:08.442Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] ┌────────────────────────┬──────────────────────────────────┬────────────────┬──────────────────────┐
+│ Project Display Name   │ Project ID                       │ Project Number │ Resource Location ID │
+├────────────────────────┼──────────────────────────────────┼────────────────┼──────────────────────┤
+│ com-slaughterhouse-app │ com-slaughterhouse-app (current) │ 54124005324    │ [Not specified]      │
+├────────────────────────┼──────────────────────────────────┼────────────────┼──────────────────────┤
+│ [Not specified]        │ pokedex-95f135c5                 │ 687904587372   │ [Not specified]      │
+└────────────────────────┴──────────────────────────────────┴────────────────┴──────────────────────┘
+[info] 
+[info] 2 project(s) total.
+[debug] [2026-10-10T17:21:44.822Z] ----------------------------------------------------------------------
+[debug] [2026-10-10T17:21:44.825Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Acer\AppData\Local\npm-cache\_npx\ba4f1959e38407b5\node_modules\firebase-tools\lib\bin\firebase.js projects:list --json
+[debug] [2026-10-10T17:21:44.826Z] CLI Version:   15.33.0
+[debug] [2026-10-10T17:21:44.826Z] Platform:      win32
+[debug] [2026-10-10T17:21:44.826Z] Node Version:  v24.14.0
+[debug] [2026-10-10T17:21:44.826Z] Detected Agent: codex_cli
+[debug] [2026-10-10T17:21:44.826Z] Time:          Sun Oct 11 2026 01:21:44 GMT+0800 (Philippine Standard Time)
+[debug] [2026-10-10T17:21:44.826Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-10T17:21:45.104Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-10T17:21:45.105Z] > authorizing via signed-in user (viannoscal@gmail.com)
+[debug] [2026-10-10T17:21:45.127Z] Checked if tokens are valid: true, expires at: 1791656071233
+[debug] [2026-10-10T17:21:45.127Z] Checked if tokens are valid: true, expires at: 1791656071233
+[debug] [2026-10-10T17:21:45.129Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2026-10-10T17:21:45.770Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-10-10T17:21:45.770Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] ┌────────────────────────┬──────────────────────────────────┬────────────────┬──────────────────────┐
+│ Project Display Name   │ Project ID                       │ Project Number │ Resource Location ID │
+├────────────────────────┼──────────────────────────────────┼────────────────┼──────────────────────┤
+│ com-slaughterhouse-app │ com-slaughterhouse-app (current) │ 54124005324    │ [Not specified]      │
+├────────────────────────┼──────────────────────────────────┼────────────────┼──────────────────────┤
+│ [Not specified]        │ pokedex-95f135c5                 │ 687904587372   │ [Not specified]      │
+└────────────────────────┴──────────────────────────────────┴────────────────┴──────────────────────┘
+[info] 
+[info] 2 project(s) total.

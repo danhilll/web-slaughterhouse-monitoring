@@ -1820,6 +1820,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
 }
 
 function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: DashboardData | null; recordings: SlaughterRecord[]; invoices: Invoice[] }) {
+  const { motionEnabled } = useWorkspaceMotion();
   if (!dashboard) return <LoadingDashboard />;
 
   const revenueTrend = useMemo(() => {
@@ -1879,7 +1880,7 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
                 <XAxis dataKey="month" />
                 <YAxis />
                 <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                <Line type="monotone" dataKey="revenue" stroke="#8b9f2f" strokeWidth={3} />
+                <Line type="monotone" dataKey="revenue" stroke="#8b9f2f" strokeWidth={3} isAnimationActive={motionEnabled} animationDuration={650} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -1895,8 +1896,8 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="Cow" fill="#a3b92e" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="Pig" fill="#9d92c6" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="Cow" fill="#a3b92e" radius={[8, 8, 0, 0]} isAnimationActive={motionEnabled} animationDuration={650} />
+                <Bar dataKey="Pig" fill="#9d92c6" radius={[8, 8, 0, 0]} isAnimationActive={motionEnabled} animationDuration={650} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1909,7 +1910,7 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={dashboard.feeBreakdown} dataKey="value" innerRadius={52} outerRadius={90}>
+                <Pie data={dashboard.feeBreakdown} dataKey="value" innerRadius={52} outerRadius={90} isAnimationActive={motionEnabled} animationDuration={650}>
                   {dashboard.feeBreakdown.map((entry, index) => (
                     <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
