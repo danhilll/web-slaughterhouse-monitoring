@@ -85,3 +85,14 @@
 - **UI restyle U1–U6 (refined emerald gov):** professor feedback called the
   original UI ugly; direction chosen by owner. Surface-only, zero logic
   changes, verified by `npm run verify` after every brick.
+
+## 2026-10-10 security + load diagnosis (project ~50% complete)
+
+- Owner asked: how vulnerable is this to many docs / many concurrent users, where are bottleneck codes and guards, what is best security layer.
+- Diagnosis given (no code changed, no pentest run yet):
+  - Guards holding: `firestore.rules` deny-all (`/{document=**}`), `server/access.js` `verifyIdToken(token,true)` + `WEB_ADMIN_UIDS` allowlist, `createWriteGuard(false)` pausing all POST/PATCH/DELETE, `express.json 64kb`, generic 500 handler, `Cache-Control: no-store`, `.env` git-ignored.
+  - Load bottlenecks: fake pagination `server/index.js:48-56 applyLimit` (fetch-all then slice); unbounded `.collection().get()` in `listVendors/listRecords/listInvoices/listNotifications` (`server/index.js:331,366,416,466`); `buildDashboard()` full 4-collection scan on every call (`server/index.js:582-588`); frontend `loadData()` 6 parallel GETs per page load (`src/App.tsx:184-191`) + client-side filter/paginate; `markAllNotificationsRead()` unbounded single batch (`server/index.js:499-510`, fails >500); two-step non-transactional auto-invoice (`src/App.tsx:282-345`); `Math.random()` IDs (`server/index.js:22-26`); no rate-limit/helmet/compression/timeout; `verifyIdToken` every request with no cache; defined indexes in `firestore.indexes.json` unused; single Node process.
+  - Security gaps: no App Check / MFA / WAF / audit log; coarse single `admin` role via env (prefer custom claims); no field max-length caps / stored-XSS audit for notes/notifications/PDF; inline `FIREBASE_PRIVATE_KEY` in `.env` risk (prefer file + Secret Manager).
+- Recommendation locked for later: keep deny-all Firestore + Express Admin-SDK gateway; P0 = rate-limit + helmet + compression + real cursor pagination + dashboard/fees cache + token cache + batched mark-all-read + idempotency; P1 = App Check + MFA + custom claims + audit_log; P2 = Cloud Run/App Hosting autoscale + Cloud Armor + Cloud Logging alerts + k6 load test at 5k docs.
+- Owner context: this is ~50% of project, other features not yet added. Owner is fixing UI/UX design first. Agreed UI work must stay via `/api/*` + `apiFetch`, no direct Firestore from client, no secrets in `VITE_*`, no `dangerouslySetInnerHTML`.
+- Deferred: full intrusion test only AFTER UI + remaining features land. Owner will signal with `ready for full security test`. Then run: auth bypass, IDOR, write-guard bypass, limit abuse, dashboard flood, Firestore probe, CORS/headers, stored XSS fuzz, secrets/error-leak audit. Needs staging URL + test admin + test non-admin accounts + list of new routes.

@@ -3,6 +3,9 @@ import { onIdTokenChanged, sendPasswordResetEmail, signInWithEmailAndPassword, s
 import App from './App';
 import { apiFetch, WEB_ACCESS_LOST_EVENT } from './api';
 import { auth, isFirebaseConfigured } from './firebase';
+import { ArrowUpRight, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { AmbientBackdrop, LedgerArtwork, WorkspaceBrand } from './WorkspaceIdentity';
+import { MotionToggle } from './WorkspaceMotion';
 
 export type WebSession = {
   uid: string;
@@ -44,6 +47,7 @@ export default function AuthGate() {
   const [resetting, setResetting] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [retryCount, setRetryCount] = useState(0);
@@ -141,12 +145,24 @@ export default function AuthGate() {
   if (session) return <App session={session} onLogout={handleSignOut} />;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10 dark:bg-slate-950">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-6">
-          <p className="text-xs font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">Municipal Office</p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">Slaughterhouse dashboard</h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Sign in with an authorized web administrator account.</p>
+    <main className="auth-page">
+      <div className="auth-shell">
+        <section className="auth-story" aria-label="Municipal operations workspace">
+          <AmbientBackdrop />
+          <WorkspaceBrand />
+          <div className="auth-story-copy">
+            <p className="eyebrow">Built around your daily work</p>
+            <h2>Better clarity.<br /><span>Every working day.</span></h2>
+            <p>A connected workspace for municipal slaughterhouse records, vendors, and billing.</p>
+          </div>
+          <LedgerArtwork />
+          <div className="auth-story-footer"><span>Municipal office / Operations</span><ArrowUpRight size={17} /></div>
+        </section>
+      <section className="auth-form-panel" aria-labelledby="sign-in-title">
+        <div>
+          <p className="auth-form-kicker"><ShieldCheck size={14} /> Administrator access</p>
+          <h1 id="sign-in-title">Welcome to your<br />workspace<span className="heading-dot">.</span></h1>
+          <p className="auth-form-description">Sign in to the slaughterhouse dashboard with your authorized administrator account.</p>
         </div>
 
         {!isFirebaseConfigured ? (
@@ -176,9 +192,14 @@ export default function AuthGate() {
               </div>
               <div>
                 <label htmlFor="admin-password" className="label">Password</label>
-                <input id="admin-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="input" />
+                <div className="password-wrap">
+                  <input id="admin-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="input pr-11" />
+                  <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="password-toggle">
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
               </div>
-              <button type="submit" disabled={submitting} className="btn-primary w-full">{submitting ? 'Signing in…' : 'Sign in'}</button>
+              <button type="submit" disabled={submitting} className="btn-primary w-full">{submitting ? 'Signing in…' : 'Sign in to workspace'}<ArrowUpRight size={16} /></button>
             </form>
             <button type="button" disabled={!email.trim() || resetting} onClick={() => void handlePasswordReset()} className="btn-ghost mt-3 w-full">
               {resetting ? 'Sending reset email…' : 'Reset Firebase password'}
@@ -187,6 +208,9 @@ export default function AuthGate() {
             {authUser && <button type="button" onClick={() => void handleSignOut()} className="btn-ghost mt-4 w-full">Sign out</button>}
           </>
         )}
+        <p className="auth-form-footnote"><ShieldCheck size={13} /> Authorized municipal personnel only</p>
+        <div className="auth-motion-control"><MotionToggle showLabel /></div>
+      </section>
       </div>
     </main>
   );

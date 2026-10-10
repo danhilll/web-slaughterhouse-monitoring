@@ -1,24 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDownRight,
+  ArrowUpRight,
   BarChart3,
   Bell,
+  CalendarDays,
   ClipboardList,
   CreditCard,
+  Eye,
   FileText,
   Gauge,
   Menu,
   Moon,
+  Pencil,
   PiggyBank,
   Search,
   Settings,
   ShieldCheck,
   Sun,
+  Trash2,
   TrendingUp,
   Users,
-  Warehouse,
   X
 } from 'lucide-react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Bar,
   BarChart,
@@ -38,8 +43,10 @@ import { jsPDF } from 'jspdf';
 import type { DashboardData, FeeConfig, Invoice, NotificationItem, SlaughterRecord, Vendor } from './types';
 import type { WebSession } from './AuthGate';
 import { apiFetch } from './api';
+import { AmbientBackdrop, LedgerArtwork, WorkspaceBrand } from './WorkspaceIdentity';
+import { MotionToggle, useWorkspaceMotion } from './WorkspaceMotion';
 
-const COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
+const COLORS = ['#a3b92e', '#9d92c6', '#dda771', '#6d9386'];
 
 // Themed Recharts tooltip (U3). Set `money` to format values as PHP.
 const ChartTooltip = ({ active, payload, label, money }: any) => {
@@ -63,6 +70,59 @@ const formatCurrency = (value: number) =>
     currency: 'PHP',
     minimumFractionDigits: 2
   }).format(value || 0);
+
+// Design-only presentational helpers (no business logic).
+// Centralizes status colors so pills look consistent like enterprise suites.
+function StatusPill({ status }: { status: string }) {
+  const tone =
+    status === 'Paid' || status === 'Completed' || status === 'Active'
+      ? 'status-pill-success'
+      : status === 'Overdue' || status === 'Cancelled'
+        ? 'status-pill-danger'
+        : status === 'Pending' || status === 'Unpaid'
+          ? 'status-pill-warning'
+          : 'status-pill-neutral';
+  return (
+    <span className={`status-pill ${tone}`}>
+      <span className="status-dot" aria-hidden="true" />
+      {status}
+    </span>
+  );
+}
+
+function DensityToggle({ value, onChange }: { value: 'comfortable' | 'compact'; onChange: (v: 'comfortable' | 'compact') => void }) {
+  return (
+    <div className="table-density-toggle" role="group" aria-label="Table density">
+      <button type="button" className={value === 'comfortable' ? 'is-active' : ''} onClick={() => onChange('comfortable')}>Comfortable</button>
+      <button type="button" className={value === 'compact' ? 'is-active' : ''} onClick={() => onChange('compact')}>Compact</button>
+    </div>
+  );
+}
+
+function ConfirmDialog({ title, message, confirmLabel = 'Delete', onConfirm, onCancel, busy }: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy?: boolean;
+}) {
+  return (
+    <Modal title={title} onClose={onCancel}>
+      <div className="flex items-start gap-4">
+        <span className="confirm-dialog-icon"><Trash2 size={20} /></span>
+        <div>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{message}</p>
+        </div>
+      </div>
+      <div className="modal-sticky-footer mt-6 flex justify-end gap-3">
+        <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
+        <button type="button" onClick={onConfirm} disabled={busy} className="btn-danger">{busy ? 'Working…' : confirmLabel}</button>
+      </div>
+    </Modal>
+  );
+}
 
 const formatDate = (value: string) => {
   if (!value) return '--';
@@ -456,20 +516,10 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
     showToast('Service fees updated.');
   };
 
-  const appRootClass = darkMode ? 'dark bg-slate-900 text-slate-100' : 'bg-slate-100 text-slate-900';
+  const appRootClass = `workspace ${darkMode ? 'dark' : ''}`;
 
   return (
     <div className={appRootClass}>
-      {!session.writesEnabled && (
-        <div role="status" className="border-b border-amber-300 bg-amber-100 px-4 py-3 text-center text-sm font-medium text-amber-950">
-          Viewing the shared Firebase project. Web changes are paused while mobile and web records are connected.
-        </div>
-      )}
-      {feesConfigured === false && (
-        <div role="status" className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-950">
-          No approved fee schedule is stored in Firestore. Displayed fee amounts are sample defaults and must not be used for billing.
-        </div>
-      )}
       <div className="min-h-screen">
         <Routes>
           <Route
@@ -487,6 +537,7 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
                 notifications={notifications}
                 dashboard={dashboard}
                 feeConfig={feeConfig}
+                feesConfigured={feesConfigured}
                 addVendor={addVendor}
                 updateVendor={updateVendor}
                 addRecord={addRecord}
@@ -533,6 +584,7 @@ function DashboardLayout({
   notifications,
   dashboard,
   feeConfig,
+  feesConfigured,
   addVendor,
   updateVendor,
   addRecord,
@@ -600,92 +652,99 @@ function DashboardLayout({
     '/service-computation': 'Service Computation'
   };
   const currentTitle = pageTitles[location.pathname] || 'Dashboard';
+  const pageDescriptions: Record<string, string> = {
+    '/': 'A complete picture of your municipal operations.',
+    '/records': 'Track livestock intake and daily slaughter activity.',
+    '/invoices': 'Keep billing, payments, and outstanding balances in view.',
+    '/statistics': 'Explore the numbers behind your operations.',
+    '/vendors': 'Your vendor directory, organized in one place.',
+    '/notifications': 'Stay up to date with billing and operational activity.',
+    '/service-computation': 'Review service rates and estimate charges.'
+  };
+  const displayDate = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' }).format(new Date());
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    document.addEventListener('keydown', dismiss);
+    return () => document.removeEventListener('keydown', dismiss);
+  }, [mobileNavOpen]);
 
   // B27: no dark class here — App already applies `dark` on the outer root,
   // so a second toggle would be redundant.
   return (
-    <div>
-      {mobileNavOpen && <button type="button" aria-label="Close mobile navigation" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-20 bg-slate-900/50 lg:hidden" />}
-      <div className="flex min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-emerald-50/50 text-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/20 dark:text-slate-100">
-        <aside className={`${mobileNavOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-30 w-72 flex-col border-r border-slate-200/70 bg-white/90 p-5 shadow-lift backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 lg:static lg:flex lg:z-auto`}>
-          <div className="mb-8 flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-700 text-lg font-bold text-white shadow-emerald ring-1 ring-emerald-900/20">
-              <Warehouse size={24} />
-            </div>
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-400">LGU Office</div>
-              <h1 className="text-lg font-extrabold tracking-tight">Slaughterhouse</h1>
-            </div>
-          </div>
-
-          <nav className="space-y-1.5" aria-label="Primary">
-            {navItems.map(({ label, to, icon: Icon, badge }: any) => (
+    <div className="workspace-frame">
+      <a href="#workspace-content" className="skip-link">Skip to content</a>
+      {mobileNavOpen && <button type="button" aria-label="Close mobile navigation" onClick={() => setMobileNavOpen(false)} className="nav-scrim lg:hidden" />}
+      <div className="workspace-shell">
+        <aside id="workspace-navigation" className={`workspace-sidebar ${mobileNavOpen ? 'is-open' : ''}`}>
+          <Link to="/" className="sidebar-brand" aria-label="Slaughterhouse dashboard"><WorkspaceBrand /></Link>
+          <button type="button" onClick={() => setMobileNavOpen(false)} className="sidebar-close lg:hidden" aria-label="Close navigation"><X size={20} /></button>
+          <div className="sidebar-workspace"><span className="workspace-dot" /> Municipal office <span>01</span></div>
+          <nav className="sidebar-nav" aria-label="Primary">
+            <p className="nav-section-label">Workspace</p>
+            {navItems.map(({ label, to, icon: Icon, badge }: any, index: number) => (
+              <div key={to}>
+              {index === 5 && <p className="nav-section-label nav-section-secondary">Manage</p>}
               <NavLink
                 key={label}
                 to={to}
                 end={to === '/'}
                 onClick={() => setMobileNavOpen(false)}
                 className={({ isActive }) =>
-                  `group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-150 ${
-                    isActive
-                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-emerald'
-                      : 'text-slate-600 hover:translate-x-0.5 hover:bg-emerald-50 hover:text-emerald-800 dark:text-slate-300 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200'
-                  }`
+                  `sidebar-link ${isActive ? 'is-active' : ''}`
                 }
               >
-                <Icon size={18} className="shrink-0" />
+                <Icon size={18} strokeWidth={1.7} className="shrink-0" />
                 <span className="flex-1">{label}</span>
                 {typeof badge === 'number' && badge > 0 && (
-                  <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-amber-950 shadow-sm">
+                  <span className="nav-badge">
                     {badge > 99 ? '99+' : badge}
                   </span>
                 )}
               </NavLink>
+              </div>
             ))}
           </nav>
 
-          <div className="mt-auto rounded-2xl bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 p-4 text-white shadow-emerald">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-100">
-              <ShieldCheck size={14} />
-              Web administrator
-            </div>
-            <p className="break-all font-bold">{session.email || session.uid}</p>
-            <p className="text-sm text-emerald-100/90">Administrator</p>
-            <p className="mt-2 inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white ring-1 ring-inset ring-white/25">Signed in</p>
+          <div className="sidebar-footer">
+            <div className="sidebar-footer-icon"><ShieldCheck size={21} strokeWidth={1.5} /><ArrowUpRight size={16} /></div>
+            <p>Everything in its place.</p>
+            <span>Records, billing, and insights.<br />One municipal workspace.</span>
+            <div className="sidebar-session"><span className="workspace-dot" /> Administrator session</div>
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/75 px-4 py-4 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:px-8">
+        <div className="workspace-surface">
+          <header className="workspace-header">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <button type="button" aria-label="Toggle navigation" onClick={() => setMobileNavOpen((current) => !current)} className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm lg:hidden dark:border-slate-700 dark:bg-slate-800">
+                <button type="button" aria-label="Toggle navigation" aria-expanded={mobileNavOpen} aria-controls="workspace-navigation" onClick={() => setMobileNavOpen((current) => !current)} className="icon-button lg:hidden">
                   <Menu size={18} />
                 </button>
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-400">Municipal Office</p>
-                  <h2 className="text-xl font-extrabold tracking-tight md:text-2xl">{currentTitle}</h2>
+                  <p className="header-breadcrumb">Workspace <span>/</span> <strong>{currentTitle}</strong></p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3">
+                <span className="header-date"><CalendarDays size={14} />{displayDate}</span>
+                <MotionToggle />
                 <button
                   type="button"
                   aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
                   onClick={() => setDarkMode(!darkMode)}
-                  className="rounded-full border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm transition-all hover:rotate-12 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:text-amber-300"
+                  className="icon-button"
                 >
                   {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                 </button>
-                <div className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-700 font-bold text-white shadow-emerald">{(session.email || 'A')[0].toUpperCase()}</div>
-                  <div className="hidden sm:block">
-                    <p className="text-sm font-semibold">{session.email || session.uid}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Web administrator</p>
-                  </div>
+                <Link to="/notifications" aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ''}`} className="icon-button relative"><Bell size={18} />{unreadCount > 0 && <span className="notification-dot" />}</Link>
+                <div className="header-account">
                   <div className="relative" ref={profileRef}>
-                    <button type="button" aria-label="Profile menu" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((current) => !current)} className="rounded-lg p-2 hover:bg-slate-200 dark:hover:bg-slate-700">
-                      <Settings size={16} />
+                    <button type="button" aria-label="Profile menu" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((current) => !current)} className="account-avatar">
+                      {(session.email || 'A')[0].toUpperCase()}
                     </button>
                     {profileMenuOpen && (
                       <div className="absolute right-0 top-12 z-30 min-w-44 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
@@ -702,7 +761,15 @@ function DashboardLayout({
             </div>
           </header>
 
-          <main className="p-4 md:p-8">
+          <main id="workspace-content" tabIndex={-1} className="workspace-content">
+            <div className="page-heading"><div><p className="eyebrow">Municipal operations</p><h1>{currentTitle}<span className="heading-dot">.</span></h1><p>{pageDescriptions[location.pathname]}</p></div><span className="mode-label"><span />{session.writesEnabled ? 'Workspace active' : 'View-only workspace'}</span></div>
+            {(!session.writesEnabled || feesConfigured === false) && (
+              <div role="status" className="workspace-notice">
+                <ShieldCheck size={18} className="shrink-0" />
+                <div>{!session.writesEnabled && <p><strong>Viewing mode.</strong> Changes are paused while mobile and web records are connected.</p>}
+                {feesConfigured === false && <p>Fees shown are sample defaults. An approved fee schedule is required before billing.</p>}</div>
+              </div>
+            )}
             <Routes>
               <Route path="/" element={<DashboardPage loading={loading} dashboard={dashboard} loadError={loadErrors?.dashboard} onRetry={() => void reloadData()} />} />
               <Route path="/records" element={<SlaughterRecordsPage vendors={vendors} records={slaughterRecords} loading={loading} addRecord={addRecord} updateRecord={updateRecord} deleteRecord={deleteRecord} showToast={showToast} />} />
@@ -720,6 +787,7 @@ function DashboardLayout({
 }
 
 function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: boolean; dashboard: DashboardData | null; loadError?: string; onRetry?: () => void }) {
+  const { motionEnabled } = useWorkspaceMotion();
   if (loading && !dashboard) {
     return <LoadingDashboard />;
   }
@@ -738,27 +806,43 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
   }
 
   const statCards = [
-    { title: 'Total Vendors', value: dashboard.summary.totalVendors, icon: Users, tile: 'from-emerald-400 to-emerald-700 text-white shadow-emerald' },
-    { title: 'Slaughter Records', value: `${dashboard.summary.totalRecordsToday} today / ${dashboard.summary.totalRecordsThisMonth} month`, icon: ClipboardList, tile: 'from-amber-400 to-orange-600 text-white shadow-[0_10px_26px_rgba(245,158,11,0.35)]' },
-    { title: 'Total Revenue', value: formatCurrency(dashboard.summary.totalRevenueThisMonth), icon: CreditCard, tile: 'from-sky-400 to-blue-700 text-white shadow-[0_10px_26px_rgba(59,130,246,0.35)]' },
-    { title: 'Unpaid Invoices', value: `${dashboard.summary.unpaidInvoicesCount}`, icon: FileText, tile: 'from-rose-400 to-red-600 text-white shadow-[0_10px_26px_rgba(244,63,94,0.35)]' }
+    { title: 'Total vendors', value: dashboard.summary.totalVendors, detail: 'In your vendor directory', icon: Users, to: '/vendors', tone: 'neutral' },
+    { title: 'Records today', value: dashboard.summary.totalRecordsToday, detail: `${dashboard.summary.totalRecordsThisMonth} records this month`, icon: ClipboardList, to: '/records', tone: 'neutral' },
+    { title: 'Monthly revenue', value: formatCurrency(dashboard.summary.totalRevenueThisMonth), detail: 'Collected this month', icon: CreditCard, to: '/statistics', tone: 'accent' },
+    { title: 'Unpaid invoices', value: dashboard.summary.unpaidInvoicesCount, detail: 'Awaiting payment', icon: FileText, to: '/invoices', tone: 'neutral' }
   ];
+  const hasVolume = dashboard.monthlySlaughterVolume.some((month) => month.Cow > 0 || month.Pig > 0);
+  const hasFees = dashboard.feeBreakdown.some((fee) => fee.value > 0);
 
   return (
-    <div className="page-enter space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="page-enter dashboard-composition space-y-6">
+      <section className="overview-hero" aria-label="Operations overview">
+        <AmbientBackdrop />
+        <div className="overview-hero-copy">
+          <span className="hero-kicker"><span /> {dashboard.municipality || 'Municipal'} office</span>
+          <h2>Your operations.<br /><span>One clear view.</span></h2>
+          <p>Keep track of daily activity, manage records, and stay on top of municipal billing.</p>
+          <Link to="/records" className="hero-link">Explore records <span><ArrowUpRight size={18} /></span></Link>
+        </div>
+        <LedgerArtwork />
+        <span className="hero-caption">CLARITY IN EVERY RECORD <ArrowDownRight size={15} /></span>
+      </section>
+      <div className="section-heading"><h2>At a glance</h2><span>Current activity <span className="small-dot" /></span></div>
+      <div className="metrics-grid">
         {statCards.map((item) => (
-          <div key={item.title} className="card card-hover p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">{item.title}</p>
-                <h3 className="tnum mt-2 truncate text-2xl font-extrabold tracking-tight">{item.value}</h3>
-              </div>
-              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${item.tile}`}>
-                <item.icon size={20} />
-              </div>
+          <Link key={item.title} to={item.to} className={`metric-card metric-${item.tone}`}>
+            <div className="metric-label">
+              <span>{item.title}</span>
+              <span className={`metric-icon-wrap ${item.tone === 'accent' ? 'bg-[#293019]/10 text-[#293019]' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'}`}>
+                <item.icon size={18} strokeWidth={1.6} />
+              </span>
             </div>
-          </div>
+            <h3 className="tnum">{item.value}</h3>
+            <div className="metric-footer">
+              <span className="metric-delta"><TrendingUp size={13} />{item.detail}</span>
+              <ArrowUpRight size={17} />
+            </div>
+          </Link>
         ))}
       </div>
 
@@ -774,27 +858,29 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
             </div>
           </div>
           <div className="h-72">
+            {!hasVolume ? <ChartEmptyState title="Your activity will take shape here" message="Monthly livestock volume appears as slaughter records are added." /> : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={dashboard.monthlySlaughterVolume} barCategoryGap="28%">
                 <defs>
                   <linearGradient id="barCow" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#34d399" />
-                    <stop offset="100%" stopColor="#059669" />
+                    <stop offset="0%" stopColor="#d5ed48" />
+                    <stop offset="100%" stopColor="#a3b92e" />
                   </linearGradient>
                   <linearGradient id="barPig" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#fbbf24" />
-                    <stop offset="100%" stopColor="#d97706" />
+                    <stop offset="0%" stopColor="#bab0d9" />
+                    <stop offset="100%" stopColor="#9d92c6" />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                <CartesianGrid strokeDasharray="3 5" stroke="var(--chart-grid)" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize: 12 }} tickLine={false} axisLine={{ stroke: '#cbd5e1' }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
-                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(16,185,129,0.08)' }} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(163,185,46,0.08)' }} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Cow" fill="url(#barCow)" radius={[8, 8, 2, 2]} />
-                <Bar dataKey="Pig" fill="url(#barPig)" radius={[8, 8, 2, 2]} />
+                <Bar dataKey="Cow" fill="url(#barCow)" radius={[8, 8, 2, 2]} isAnimationActive={motionEnabled} animationDuration={650} />
+                <Bar dataKey="Pig" fill="url(#barPig)" radius={[8, 8, 2, 2]} isAnimationActive={motionEnabled} animationDuration={650} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -809,9 +895,10 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
             </div>
           </div>
           <div className="h-72">
+            {!hasFees ? <ChartEmptyState title="A clear view of collections" message="Your fee breakdown will appear once payments are recorded." /> : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3} strokeWidth={2} className="outline-none">
+                <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3} strokeWidth={2} className="outline-none" isAnimationActive={motionEnabled} animationDuration={650}>
                   {dashboard.feeBreakdown.map((entry, index) => (
                     <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} stroke="#ffffff" strokeWidth={2} />
                   ))}
@@ -820,6 +907,7 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
               </PieChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
@@ -876,9 +964,7 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
                     <td className="py-3 pr-4">{invoice.vendor_name || 'N/A'}</td>
                     <td className="tnum py-3 pr-4 font-semibold">{formatCurrency(invoice.total_amount)}</td>
                     <td className="py-3">
-                      <span className={`pill ${invoice.payment_status === 'Paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : invoice.payment_status === 'Overdue' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}`}>
-                        {invoice.payment_status}
-                      </span>
+                      <StatusPill status={invoice.payment_status} />
                     </td>
                   </tr>
                 ))}
@@ -913,6 +999,9 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
   const [filters, setFilters] = useState({ vendor: 'All', animal: 'All', status: 'All' });
   const [page, setPage] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const pageSize = 10;
   const [form, setForm] = useState<RecordForm>({
     vendor_id: '',
@@ -1052,12 +1141,20 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
     }
   };
 
-  const confirmDelete = async (id: string) => {
-    if (!window.confirm('Delete this slaughter record? This cannot be undone.')) return;
+  const confirmDelete = (id: string) => {
+    setPendingDeleteId(id);
+  };
+
+  const executeDelete = async () => {
+    if (!pendingDeleteId) return;
+    setIsDeleting(true);
     try {
-      await deleteRecord(id);
+      await deleteRecord(pendingDeleteId);
+      setPendingDeleteId(null);
     } catch (error) {
       showToast(getErrorMessage(error, 'Unable to delete record.'), 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1068,9 +1165,12 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
           <h2 className="text-2xl font-bold">Slaughter Records</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">Monitor live slaughter entries and billing readiness.</p>
         </div>
-        <button type="button" onClick={() => setIsAddOpen(true)} className="btn-primary">
-          Add Record
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <DensityToggle value={density} onChange={setDensity} />
+          <button type="button" onClick={() => setIsAddOpen(true)} className="btn-primary">
+            Add Record
+          </button>
+        </div>
       </div>
 
       <div className="card p-4">
@@ -1126,7 +1226,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
         ) : (
           <>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table className={`min-w-full text-left text-sm ${density === 'compact' ? 'table-compact' : 'table-comfortable'}`}>
               <thead className="table-head">
                 <tr>
                   <th className="px-4 py-3 font-medium">Date</th>
@@ -1144,23 +1244,21 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
               <tbody>
                 {pagedRecords.map((record) => (
                   <tr key={record.id} className="table-row">
-                    <td className="px-4 py-3">{formatDate(record.date)}</td>
-                    <td className="px-4 py-3">{record.vendor_name || 'N/A'}</td>
+                    <td className="tnum px-4 py-3">{formatDate(record.date)}</td>
+                    <td className="px-4 py-3 font-medium">{record.vendor_name || 'N/A'}</td>
                     <td className="px-4 py-3">{record.animal_type}</td>
-                    <td className="px-4 py-3">{record.number_of_heads}</td>
+                    <td className="tnum px-4 py-3 font-semibold">{record.number_of_heads}</td>
                     <td className="px-4 py-3">{record.livestock_type}</td>
                     <td className="px-4 py-3">{record.meat_type_to_deliver}</td>
-                    <td className="px-4 py-3">{record.kilograms_cow ?? '--'}</td>
-                    <td className="px-4 py-3">{record.kilograms_pig ?? '--'}</td>
+                    <td className="tnum px-4 py-3">{record.kilograms_cow ?? '--'}</td>
+                    <td className="tnum px-4 py-3">{record.kilograms_pig ?? '--'}</td>
                     <td className="px-4 py-3">
-                      <span className={`pill ${record.status === 'Completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : record.status === 'Cancelled' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}`}>
-                        {record.status}
-                      </span>
+                      <StatusPill status={record.status} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
-                        <button type="button" onClick={() => openEditRecord(record)} className="btn-secondary btn-sm">Edit</button>
-                        <button type="button" onClick={() => void confirmDelete(record.id)} className="btn-danger btn-sm">Delete</button>
+                        <button type="button" onClick={() => openEditRecord(record)} className="icon-action" aria-label={`Edit record ${record.id}`}><Pencil size={14} />Edit</button>
+                        <button type="button" onClick={() => confirmDelete(record.id)} className="icon-action icon-action-danger" aria-label={`Delete record ${record.id}`}><Trash2 size={14} />Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -1173,10 +1271,23 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
         )}
       </div>
 
+      {pendingDeleteId && (
+        <ConfirmDialog
+          title="Delete slaughter record"
+          message={`Delete record ${pendingDeleteId}? This cannot be undone. Linked invoices are kept.`}
+          confirmLabel="Delete record"
+          busy={isDeleting}
+          onCancel={() => { if (!isDeleting) setPendingDeleteId(null); }}
+          onConfirm={() => void executeDelete()}
+        />
+      )}
+
       {isAddOpen && (
         <Modal title={editingRecordId ? 'Edit Slaughter Record' : 'Add Slaughter Record'} onClose={closeRecordModal}>
           <form onSubmit={submitRecord} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="form-section">
+              <p className="form-section-title">Intake</p>
+              <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="label">Vendor</label>
                 <select value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })} className="input" required>
@@ -1219,6 +1330,12 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
                 <input type="number" min={1} value={form.number_of_heads} onChange={(e) => setForm({ ...form, number_of_heads: Number(e.target.value) })} className="input" required />
               </div>
               )}
+              </div>
+            </div>
+            <div className="form-section">
+              <p className="form-section-title">Details & outcome</p>
+              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Weights are optional — status controls billing readiness.</p>
+              <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="label">Livestock Type</label>
                 <select value={form.livestock_type} onChange={(e) => setForm({ ...form, livestock_type: e.target.value })} className="input">
@@ -1259,9 +1376,10 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
                 </label>
               </div>
               )}
+              </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="modal-footer flex justify-end gap-3">
               <button type="button" onClick={closeRecordModal} className="btn-secondary">Cancel</button>
               <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Saving…' : editingRecordId ? 'Update Record' : 'Save Record'}</button>
             </div>
@@ -1281,6 +1399,8 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
   const [page, setPage] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actioningId, setActioningId] = useState<string | null>(null);
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [pendingDelete, setPendingDelete] = useState<Invoice | null>(null);
   const pageSize = 10;
   const [form, setForm] = useState({
     vendor_id: '',
@@ -1368,12 +1488,18 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     }
   };
 
-  const handleDelete = async (invoice: Invoice) => {
-    if (!window.confirm(`Delete invoice ${invoice.id}? This cannot be undone.`)) return;
+  const handleDelete = (invoice: Invoice) => {
+    setPendingDelete(invoice);
+  };
+
+  const executeInvoiceDelete = async () => {
+    if (!pendingDelete) return;
+    const invoice = pendingDelete;
     setActioningId(invoice.id);
     try {
       await deleteInvoice(invoice.id);
       if (selectedInvoice?.id === invoice.id) setSelectedInvoice(null);
+      setPendingDelete(null);
     } catch (error) {
       showToast(getErrorMessage(error, 'Unable to delete invoice.'), 'error');
     } finally {
@@ -1433,9 +1559,12 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
           <h2 className="text-2xl font-bold">Invoices</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">Track service billing, due dates, and payment status.</p>
         </div>
-        <button type="button" onClick={() => setIsAddOpen(true)} className="btn-primary">
-          Add Invoice
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <DensityToggle value={density} onChange={setDensity} />
+          <button type="button" onClick={() => setIsAddOpen(true)} className="btn-primary">
+            Add Invoice
+          </button>
+        </div>
       </div>
 
       <div className="card p-4">
@@ -1479,7 +1608,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
         ) : (
           <>
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table className={`min-w-full text-left text-sm ${density === 'compact' ? 'table-compact' : 'table-comfortable'}`}>
               <thead className="table-head">
                 <tr>
                   <th className="px-4 py-3 font-medium">Invoice #</th>
@@ -1494,25 +1623,23 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
               <tbody>
                 {pagedInvoices.map((invoice) => (
                   <tr key={invoice.id} className="table-row">
-                    <td className="max-w-32 truncate px-4 py-3" title={invoice.id}>{invoice.id}</td>
-                    <td className="px-4 py-3">{invoice.vendor_name || 'N/A'}</td>
-                    <td className="px-4 py-3">{formatDate(invoice.date_issued)}</td>
-                    <td className="px-4 py-3">{Number(invoice.number_of_heads_cow || 0) + Number(invoice.number_of_heads_pig || 0)}</td>
-                    <td className="px-4 py-3 font-semibold">{formatCurrency(invoice.total_amount)}</td>
+                    <td className="tnum max-w-32 truncate px-4 py-3 font-medium" title={invoice.id}>{invoice.id}</td>
+                    <td className="px-4 py-3 font-medium">{invoice.vendor_name || 'N/A'}</td>
+                    <td className="tnum px-4 py-3">{formatDate(invoice.date_issued)}</td>
+                    <td className="tnum px-4 py-3">{Number(invoice.number_of_heads_cow || 0) + Number(invoice.number_of_heads_pig || 0)}</td>
+                    <td className="tnum px-4 py-3 font-semibold">{formatCurrency(invoice.total_amount)}</td>
                     <td className="px-4 py-3">
-                      <span className={`pill ${invoice.payment_status === 'Paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : invoice.payment_status === 'Overdue' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}`}>
-                        {invoice.payment_status}
-                      </span>
+                      <StatusPill status={invoice.payment_status} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => setSelectedInvoice(invoice)} className="btn-secondary btn-sm">View</button>
+                        <button type="button" onClick={() => setSelectedInvoice(invoice)} className="icon-action" aria-label={`View invoice ${invoice.id}`}><Eye size={14} />View</button>
                         {invoice.payment_status !== 'Paid' ? (
-                          <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleStatusChange(invoice, 'Paid')} className="btn-primary btn-sm">Mark Paid</button>
+                          <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleStatusChange(invoice, 'Paid')} className="icon-action" aria-label={`Mark invoice ${invoice.id} paid`}>Mark Paid</button>
                         ) : (
-                          <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleStatusChange(invoice, 'Unpaid')} className="btn-secondary btn-sm">Mark Unpaid</button>
+                          <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleStatusChange(invoice, 'Unpaid')} className="icon-action" aria-label={`Mark invoice ${invoice.id} unpaid`}>Mark Unpaid</button>
                         )}
-                        <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleDelete(invoice)} className="btn-danger btn-sm">Delete</button>
+                        <button type="button" disabled={actioningId === invoice.id} onClick={() => handleDelete(invoice)} className="icon-action icon-action-danger" aria-label={`Delete invoice ${invoice.id}`}><Trash2 size={14} />Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -1525,10 +1652,24 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
         )}
       </div>
 
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete invoice"
+          message={`Delete invoice ${pendingDelete.id}? This cannot be undone.`}
+          confirmLabel="Delete invoice"
+          busy={actioningId === pendingDelete.id}
+          onCancel={() => { if (!actioningId) setPendingDelete(null); }}
+          onConfirm={() => void executeInvoiceDelete()}
+        />
+      )}
+
       {isAddOpen && (
         <Modal title="Add Invoice" onClose={() => setIsAddOpen(false)}>
           <form onSubmit={submitInvoice} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="form-section">
+              <p className="form-section-title">Billing source</p>
+              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Pick a vendor first — linking a slaughter record auto-fills vendor, date, and headcounts.</p>
+              <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="label">Vendor</label>
                 <select value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })} className="input" required>
@@ -1586,30 +1727,36 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
               <div>
                 <label className="label">Headcount - Cow</label>
                 <input type="number" min={0} value={form.number_of_heads_cow} onChange={(e) => setForm({ ...form, number_of_heads_cow: Number(e.target.value) })} className="input" required />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">At least one head total is required.</p>
               </div>
               <div>
                 <label className="label">Headcount - Pig</label>
                 <input type="number" min={0} value={form.number_of_heads_pig} onChange={(e) => setForm({ ...form, number_of_heads_pig: Number(e.target.value) })} className="input" required />
               </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-              <h4 className="mb-3 font-semibold">Fee breakdown ({feeBreakdown.totalHeads} head(s))</h4>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between"><span>Corral/Casket Fee</span><strong>{formatCurrency(feeBreakdown.corralFee)}</strong></div>
-                <div className="flex justify-between"><span>Delivery Fee</span><strong>{formatCurrency(feeBreakdown.deliveryFee)}</strong></div>
-                <div className="flex justify-between"><span>Anti/Post Mortem Fee</span><strong>{formatCurrency(feeBreakdown.antiMortemFee)}</strong></div>
-                <div className="flex justify-between"><span>Facility Fee</span><strong>{formatCurrency(feeBreakdown.facilityFee)}</strong></div>
-                <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold dark:border-slate-700"><span>TOTAL</span><span>{formatCurrency(feeBreakdown.total)}</span></div>
               </div>
             </div>
 
-            <div>
+            <div className="form-section">
+              <p className="form-section-title">Charges & notes</p>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+              <h4 className="mb-3 font-semibold">Fee breakdown ({feeBreakdown.totalHeads} head(s))</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span>Corral/Casket Fee</span><strong className="tnum">{formatCurrency(feeBreakdown.corralFee)}</strong></div>
+                <div className="flex justify-between"><span>Delivery Fee</span><strong className="tnum">{formatCurrency(feeBreakdown.deliveryFee)}</strong></div>
+                <div className="flex justify-between"><span>Anti/Post Mortem Fee</span><strong className="tnum">{formatCurrency(feeBreakdown.antiMortemFee)}</strong></div>
+                <div className="flex justify-between"><span>Facility Fee</span><strong className="tnum">{formatCurrency(feeBreakdown.facilityFee)}</strong></div>
+                <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold dark:border-slate-700"><span>TOTAL</span><span className="tnum">{formatCurrency(feeBreakdown.total)}</span></div>
+              </div>
+              </div>
+
+              <div className="mt-4">
               <label className="label">Notes</label>
-              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="input min-h-24" placeholder="Additional remarks" />
+              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="input min-h-24" placeholder="e.g. Paid in cash at treasury counter" />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Optional — shown on the receipt.</p>
+              </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="modal-footer flex justify-end gap-3">
               <button type="button" onClick={() => setIsAddOpen(false)} className="btn-secondary">Cancel</button>
               <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Creating…' : 'Create Invoice'}</button>
             </div>
@@ -1658,7 +1805,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
               )}
             </div>
 
-            <div className="no-print flex flex-wrap justify-end gap-3">
+            <div className="modal-sticky-footer no-print flex flex-wrap justify-end gap-3">
               <button type="button" onClick={() => void handleStatusChange(selectedInvoice, selectedInvoice.payment_status === 'Paid' ? 'Unpaid' : 'Paid')} disabled={actioningId === selectedInvoice.id} className="btn-secondary">
                 {selectedInvoice.payment_status === 'Paid' ? 'Mark Unpaid' : 'Mark Paid'}
               </button>
@@ -1728,11 +1875,11 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={revenueTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <CartesianGrid strokeDasharray="3 5" stroke="var(--chart-grid)" />
                 <XAxis dataKey="month" />
                 <YAxis />
                 <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={3} />
+                <Line type="monotone" dataKey="revenue" stroke="#8b9f2f" strokeWidth={3} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -1743,13 +1890,13 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={volumeComparison}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <CartesianGrid strokeDasharray="3 5" stroke="var(--chart-grid)" />
                 <XAxis dataKey="month" />
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="Cow" fill="#10b981" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="Pig" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="Cow" fill="#a3b92e" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="Pig" fill="#9d92c6" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1805,6 +1952,8 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [page, setPage] = useState(1);
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [pendingDeactivate, setPendingDeactivate] = useState<Vendor | null>(null);
   const pageSize = 10;
   const [form, setForm] = useState({
     name: '',
@@ -1870,10 +2019,16 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
     }
   };
 
-  const handleDeactivate = async (vendor: Vendor) => {
-    if (!window.confirm(`Mark ${vendor.name} as inactive?`)) return;
+  const handleDeactivate = (vendor: Vendor) => {
+    setPendingDeactivate(vendor);
+  };
+
+  const executeDeactivate = async () => {
+    if (!pendingDeactivate) return;
+    const vendor = pendingDeactivate;
     try {
       await deleteVendor(vendor.id);
+      setPendingDeactivate(null);
     } catch (error) {
       showToast(getErrorMessage(error, 'Unable to deactivate vendor.'), 'error');
     }
@@ -1894,9 +2049,12 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
           <h2 className="text-2xl font-bold">Vendors</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">Vendor records and active slaughter partnerships.</p>
         </div>
-        <button type="button" onClick={openAdd} className="btn-primary">
-          Add Vendor
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <DensityToggle value={density} onChange={setDensity} />
+          <button type="button" onClick={openAdd} className="btn-primary">
+            Add Vendor
+          </button>
+        </div>
       </div>
 
       <div className="card p-4">
@@ -1926,7 +2084,7 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table className={`min-w-full text-left text-sm ${density === 'compact' ? 'table-compact' : 'table-comfortable'}`}>
               <thead className="table-head">
                 <tr>
                   <th className="px-4 py-3 font-medium">Vendor Name</th>
@@ -1941,20 +2099,20 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
                 {pagedVendors.map((vendor) => (
                   <tr key={vendor.id} className="table-row">
                     <td className="px-4 py-3 font-medium">{vendor.name}</td>
-                    <td className="px-4 py-3">{vendor.contact_number}</td>
+                    <td className="tnum px-4 py-3">{vendor.contact_number}</td>
                     <td className="px-4 py-3">{vendor.animal_type}</td>
                     <td className="px-4 py-3">
-                      <span className={`pill ${vendor.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{vendor.status}</span>
+                      <StatusPill status={vendor.status} />
                     </td>
-                    <td className="px-4 py-3">{formatDate(vendor.created_at)}</td>
+                    <td className="tnum px-4 py-3">{formatDate(vendor.created_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => setSelectedVendor(vendor)} className="btn-secondary btn-sm">View</button>
-                        <button type="button" onClick={() => openEdit(vendor)} className="btn-secondary btn-sm">Edit</button>
+                        <button type="button" onClick={() => setSelectedVendor(vendor)} className="icon-action" aria-label={`View vendor ${vendor.name}`}><Eye size={14} />View</button>
+                        <button type="button" onClick={() => openEdit(vendor)} className="icon-action" aria-label={`Edit vendor ${vendor.name}`}><Pencil size={14} />Edit</button>
                         {vendor.status === 'Active' ? (
-                          <button type="button" onClick={() => void handleDeactivate(vendor)} className="btn-danger btn-sm">Deactivate</button>
+                          <button type="button" onClick={() => handleDeactivate(vendor)} className="icon-action icon-action-danger">Deactivate</button>
                         ) : (
-                          <button type="button" onClick={() => void handleReactivate(vendor)} className="btn-primary btn-sm">Reactivate</button>
+                          <button type="button" onClick={() => void handleReactivate(vendor)} className="icon-action">Reactivate</button>
                         )}
                       </div>
                     </td>
@@ -1967,6 +2125,16 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
         </div>
       )}
 
+      {pendingDeactivate && (
+        <ConfirmDialog
+          title="Deactivate vendor"
+          message={`Mark ${pendingDeactivate.name} as inactive? They will stay in history but cannot take new records.`}
+          confirmLabel="Deactivate"
+          onCancel={() => setPendingDeactivate(null)}
+          onConfirm={() => void executeDeactivate()}
+        />
+      )}
+
       {selectedVendor && (
         <Modal title="Vendor Details" onClose={() => setSelectedVendor(null)}>
           <div className="space-y-4">
@@ -1977,7 +2145,7 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
               </div>
               <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Status</p>
-                <span className={`mt-2 inline-flex pill ${selectedVendor.status === 'Active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{selectedVendor.status}</span>
+                <span className="mt-2 inline-flex"><StatusPill status={selectedVendor.status} /></span>
               </div>
               <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Contact Number</p>
@@ -2000,7 +2168,7 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
                 <p className="mt-2 font-medium">{vendorRecordCount(selectedVendor.id)}</p>
               </div>
             </div>
-            <div className="flex justify-end gap-3">
+            <div className="modal-sticky-footer flex justify-end gap-3">
               <button type="button" onClick={() => { openEdit(selectedVendor); setSelectedVendor(null); }} className="btn-secondary">Edit</button>
               <button type="button" onClick={() => setSelectedVendor(null)} className="btn-primary">Close</button>
             </div>
@@ -2011,22 +2179,12 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
       {isAddOpen && (
         <Modal title={editingVendor ? 'Edit Vendor' : 'Add Vendor'} onClose={() => { setIsAddOpen(false); setEditingVendor(null); }}>
           <form onSubmit={submitVendor} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="form-section">
+              <p className="form-section-title">Business identity</p>
+              <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="label">Vendor Name</label>
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" required />
-              </div>
-              <div>
-                <label className="label">Contact Number</label>
-                <input value={form.contact_number} onChange={(e) => setForm({ ...form, contact_number: e.target.value })} className="input" required />
-              </div>
-              <div className="md:col-span-2">
-                <label className="label">Address</label>
-                <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="input" />
-              </div>
-              <div>
-                <label className="label">Email</label>
-                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input" required />
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" placeholder="e.g. Nayon Meat Trading" required />
               </div>
               <div>
                 <label className="label">Animal Type</label>
@@ -2036,8 +2194,27 @@ function VendorsPage({ vendors, records, loading, addVendor, updateVendor, delet
                   <option value="Both">Both</option>
                 </select>
               </div>
+              <div className="md:col-span-2">
+                <label className="label">Address</label>
+                <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="input" placeholder="Street, barangay" />
+              </div>
+              </div>
             </div>
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="form-section">
+              <p className="form-section-title">Contact</p>
+              <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="label">Contact Number</label>
+                <input value={form.contact_number} onChange={(e) => setForm({ ...form, contact_number: e.target.value })} className="input" placeholder="09xx-xxx-xxxx" required />
+              </div>
+              <div>
+<label className="label">Email</label>
+                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input" placeholder="vendor@example.com" required />
+              </div>
+            </div>
+            </div>
+
+            <div className="modal-footer flex justify-end gap-3">
               <button type="button" onClick={() => { setIsAddOpen(false); setEditingVendor(null); }} className="btn-secondary">Cancel</button>
               <button type="submit" disabled={isSubmitting} className="btn-primary">{isSubmitting ? 'Saving…' : editingVendor ? 'Update Vendor' : 'Save Vendor'}</button>
             </div>
@@ -2296,11 +2473,21 @@ function TableSkeleton() {
   );
 }
 
+function ChartEmptyState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="chart-empty">
+      <span className="chart-empty-symbol"><BarChart3 size={24} strokeWidth={1.3} /></span>
+      <strong>{title}</strong>
+      <p>{message}</p>
+    </div>
+  );
+}
+
 function EmptyState({ title, message }: { title: string; message: string }) {
   return (
     <div className="flex min-h-56 flex-col items-center justify-center gap-2 p-8 text-center">
-      <div className="rounded-2xl bg-gradient-to-br from-emerald-100 to-teal-100 p-4 text-emerald-700 dark:from-emerald-900/50 dark:to-teal-900/50 dark:text-emerald-300">
-        <BarChart3 size={22} />
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-emerald-700 dark:border-slate-700 dark:bg-slate-800 dark:text-emerald-300">
+        <BarChart3 size={22} strokeWidth={1.4} />
       </div>
       <h3 className="text-lg font-bold">{title}</h3>
       <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">{message}</p>
@@ -2322,10 +2509,11 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-      <button type="button" aria-label="Close dialog" onClick={onClose} className="overlay-enter absolute inset-0 bg-slate-950/55 backdrop-blur-sm" />
-      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="modal-panel-enter relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl border border-slate-200/70 bg-white p-5 shadow-lift dark:border-slate-700 dark:bg-slate-900 md:p-6">
-        <div className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200/70 pb-4 dark:border-slate-700/70">
+    <div className="fixed inset-0 z-40 overflow-y-auto p-4">
+      <button type="button" aria-label="Close dialog" onClick={onClose} className="overlay-enter fixed inset-0 bg-slate-950/55 backdrop-blur-sm" />
+      <div className="relative flex min-h-full items-center justify-center">
+      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="modal-panel-enter relative flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lift dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/70 px-5 pb-4 pt-5 dark:border-slate-700/70 md:px-6 md:pt-6">
           <div className="flex items-center gap-3">
             <div className="h-8 w-1.5 rounded-full bg-gradient-to-b from-emerald-400 to-emerald-700" />
             <h3 className="text-xl font-extrabold tracking-tight">{title}</h3>
@@ -2334,7 +2522,8 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
             <X size={14} /> Close
           </button>
         </div>
-        {children}
+        <div className="modal-body-scroll px-5 pb-5 pt-5 md:px-6 md:pb-6">{children}</div>
+      </div>
       </div>
     </div>
   );
