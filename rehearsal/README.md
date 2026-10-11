@@ -66,6 +66,19 @@ The separate debuggable build has application ID `com.slaughterhouse.app.rehears
 
 Select Vendor, then `alice@rehearsal.example.test`, `bob@rehearsal.example.test` or `empty@rehearsal.example.test`, with exact **public synthetic fixture password** `Synthetic-only-42!`. Alice has 23 invoices (20 then 3), Bob one of his own, Empty zero. The UI test covers login, canonical details/status/total, pagination, schema error versus empty, recovery, logout and Alice -> Bob -> Empty switching.
 
-On 2026-10-11 the API's 14 emulator checks passed and the UI test APK compiled, but **device UI tests were not executed**: `adb devices -l` found no devices and no AVD was configured. Runtime UI verification remains required. Stop both API and launcher with Ctrl+C after testing.
+On 2026-10-11 the API's **14 emulator checks passed**. A subsequent Android run passed **both instrumentation tests**, including the complete login/details/pagination/error/recovery/logout/Alice -> Bob -> Empty flow on Android 17/API 37 (`emulator-5554`, `sdk_gphone16k_x86_64`). The first offline attempt needed uncached test-runner dependencies; acquire them once by omitting `--offline`, then rerun offline. Espresso was updated to test-only 3.7.0 for the API 37 input manager change, the legacy package assertion now uses the build's application ID, and login waits for screen/keyboard stability before clicking Sign In.
+
+The original Pixel_10_Pro AVD could not boot on C: because its userdata required about 12 GB and only 3.2 GB was free. A separate `Mobile_Rehearsal` AVD was created from the installed image/configuration under this web repository's ignored `.rehearsal-runtime/avd` on D:, preserving the original configuration and avoiding any existing account-data copy. Reboot this existing machine-local rehearsal AVD with:
+
+```powershell
+$env:ANDROID_AVD_HOME='D:\PC\Documents\GitHub\web-slaughterhouse-monitoring\.rehearsal-runtime\avd'
+$env:ANDROID_USER_HOME='C:\Users\Acer\.android'
+& 'C:\Users\Acer\AppData\Local\Android\Sdk\emulator\emulator.exe' -avd Mobile_Rehearsal -no-window -no-snapshot -no-boot-anim -no-audio
+# In the Android test terminal, after ADB lists device and boot_completed is 1:
+$env:ANDROID_SERIAL='emulator-5554'
+.\gradlew.bat :app:connectedRehearsalAndroidTest -PrehearsalDeviceTests=true --gradle-user-home C:\Users\Acer\.gradle --offline
+```
+
+The AVD is local generated state, not a committed device definition. Test artifacts are in Android `app/build/reports/androidTests/connected/rehearsal/index.html` and `app/build/outputs/androidTest-results/connected/rehearsal`. Stop API/launcher with Ctrl+C after testing. Stop the owned rehearsal device using `adb -s emulator-5554 emu kill` after confirming its AVD name is `Mobile_Rehearsal`; do not stop another user's device. Production Firebase configuration and live data were unchanged.
 
 Keep jar/runtime directories, logs, APKs, build output, `.env`, service accounts and `local.properties` out of commits. Source/test/report changes are prepared separately in both repositories; no commit, push, provisioning, deployment or billing enablement is part of these commands.

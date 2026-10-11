@@ -122,3 +122,9 @@ Propose server-owned `mobile_memberships/{uid}` records with role, status, munic
 Adapt Android authentication/vendor invoice loading to this API. Remove reliance on UID-keyed vendor business documents/direct listeners for migrated flows. Clear all account data and pending requests on logout/account switching. Test actual API handlers and Android data flows with synthetic identities: correct access, cross-vendor/scope denial, missing/inactive membership, wrong claims, disabled/revoked users, account switching and denied mutations. Run appropriate checks and save MOBILE_INTEGRATION_RESULTS.md with the final contract, changed files, test evidence and remaining production steps.
 
 Do not change live accounts, claims, records, rules, registrations, permissions or google-services.json; do not deploy or enable billing. Do not infer real roles from historical Users.role or overwrite Users. The owner will push the result and notify this session for review before real-account connection.
+# Latest handoff: 2026-10-11 device rehearsal complete
+
+Android repo is `C:\Users\Acer\AndroidStudioProjects\Capsto-Project`. Its review branch `isolated-mobile-integration-rehearsal` is pushed at `8c70915`; local and GitHub hashes were verified. Saved instrumentation XML shows 2 tests, zero failures/errors/skips on isolated `Mobile_Rehearsal` AVD, Android 17/API 37. Original Pixel AVD lacked C: disk space; successful testing used generated AVD state on D:. Production Firebase remains unchanged.
+
+Current release preparation is described in `REAL_MOBILE_RELEASE_PLAN.md`. Awaiting owner answers: pilot vendor UID/business ownership and municipality name/scope. Do not assume the existing web administrator owns a vendor business. Live provisioning, deployment, Android production project switch and official billing remain pending concrete review and authorization. Earlier pending device-test and missing-mobile-folder entries below are historical.
+
