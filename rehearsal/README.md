@@ -1,5 +1,7 @@
 # Isolated mobile emulator rehearsal
 
+Account creation rehearsal: after the emulators finish starting, run `npm.cmd run rehearsal:verify:accounts` with the same two emulator-host variables. It validates treasurer-managed setup, local password invitations, mobile login and deactivation using unique synthetic records without resetting an active walkthrough. See `ACCOUNT_MANAGEMENT.md` for the account workflow and live activation prerequisites.
+
 Uses only `demo-mobile-rehearsal`: Auth `127.0.0.1:9199`, Firestore `127.0.0.1:8180`, real mobile Express router `127.0.0.1:5002`. Never start `server/index.js`, `npm run dev`, production seeding/inspection/deployment scripts or the ordinary Android debug application for this rehearsal.
 
 The harness rejects missing emulator hosts, non-loopback hosts, conflicting project IDs and credential environment variables before Admin initialization or writes. HTTP, fetch and socket destinations are restricted to loopback. Admin uses an ephemeral synthetic key and explicit demo project/database host; no real credential discovery, tokens or keys in logs.
@@ -82,3 +84,7 @@ $env:ANDROID_SERIAL='emulator-5554'
 The AVD is local generated state, not a committed device definition. Test artifacts are in Android `app/build/reports/androidTests/connected/rehearsal/index.html` and `app/build/outputs/androidTest-results/connected/rehearsal`. Stop API/launcher with Ctrl+C after testing. Stop the owned rehearsal device using `adb -s emulator-5554 emu kill` after confirming its AVD name is `Mobile_Rehearsal`; do not stop another user's device. Production Firebase configuration and live data were unchanged.
 
 Keep jar/runtime directories, logs, APKs, build output, `.env`, service accounts and `local.properties` out of commits. Source/test/report changes are prepared separately in both repositories; no commit, push, provisioning, deployment or billing enablement is part of these commands.
+
+## Account and animal API verification
+
+With the guarded Auth/Firestore emulators already running and both emulator hosts explicitly set as above, run `npm run rehearsal:verify:accounts` (18 checks) and `npm run rehearsal:verify:animals` (16 checks). These scripts create uniquely named synthetic users and scoped records, test actual API/Auth/Firestore behavior, and clean up only their own fixtures. They do not reset the running demo or send real setup emails. Read ACCOUNT_MANAGEMENT.md and ANIMAL_WORKFLOW.md for the contract and pending activation steps.

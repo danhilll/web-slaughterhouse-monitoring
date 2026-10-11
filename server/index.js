@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createWebAdminMiddleware, createWriteGuard, parseAdminUids } from './access.js';
 import { createMobileRouter, createMobileFirestoreStore } from './mobile.js';
+import { createAccountsRouter, createAccountStore, createFirebaseInvitationSender } from './accounts.js';
+import { createAnimalRouter, createAnimalStore, createAnimalMobileAuth } from './animals.js';
 
 const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -11,7 +13,7 @@ if (existsSync(envPath)) process.loadEnvFile(envPath);
 const app = express();
 const requestedPort = Number(process.argv[2] || process.env.PORT || 5000);
 const PORT = Number.isFinite(requestedPort) ? requestedPort : 5000;
-const MUNICIPALITY = 'San Fernando';
+const MUNICIPALITY = process.env.MUNICIPALITY_NAME || 'Calauag';
 const WEB_ADMIN_UIDS = parseAdminUids(process.env.WEB_ADMIN_UIDS);
 // The live project currently has only `Users`; web collections are not mapped
 // to mobile data yet. Keep mutation routes closed until that mapping is built.
@@ -671,11 +673,33 @@ app.use('/api', (req, res, next) => {
   next();
 });
 // Mobile router is terminal and precedes the unchanged administrator guard.
+const animalStore = createAnimalStore(() => firestoreDb);
+const animalWorkflowEnabled = process.env.ANIMAL_WORKFLOW_ENABLED === 'true';
+const municipalScope = process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag';
+app.use('/api/mobile/animals', express.json({ limit: '16kb' }),
+  createAnimalMobileAuth(() => firebaseAuth, animalStore),
+  createAnimalRouter({ store: animalStore, enabled: animalWorkflowEnabled, getPrincipal: req => req.animalUser }));
 app.use('/api/mobile', createMobileRouter({
   getAuth: () => firebaseAuth,
   store: createMobileFirestoreStore(() => firestoreDb)
 }));
 app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
+app.use('/api/animals', express.json({ limit: '16kb' }), createAnimalRouter({
+  store: animalStore, enabled: animalWorkflowEnabled,
+  getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
+}));
+app.use('/api/accounts', express.json({ limit: '16kb' }), createAccountsRouter({
+  getAuth: () => firebaseAuth,
+  store: createAccountStore(() => firestoreDb),
+  adminUids: WEB_ADMIN_UIDS,
+  enabled: process.env.ACCOUNT_MANAGEMENT_ENABLED === 'true',
+  scope: process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag',
+  municipalityName: 'Municipality of Calauag, Quezon, Philippines',
+  sendInvitation: createFirebaseInvitationSender({
+    apiKey: process.env.VITE_FIREBASE_API_KEY,
+    emulatorHost: process.env.FIREBASE_AUTH_EMULATOR_HOST
+  })
+}));
 app.use('/api', createWriteGuard(WEB_WRITES_ENABLED));
 app.use('/api', express.json({ limit: '64kb' }));
 

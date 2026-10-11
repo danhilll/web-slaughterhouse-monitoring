@@ -43,6 +43,8 @@ import { jsPDF } from 'jspdf';
 import type { DashboardData, FeeConfig, Invoice, NotificationItem, SlaughterRecord, Vendor } from './types';
 import type { WebSession } from './AuthGate';
 import { apiFetch } from './api';
+import { UsersPage } from './UsersPage';
+import { AnimalsPage } from './AnimalsPage';
 import { AmbientBackdrop, LedgerArtwork, WorkspaceBrand } from './WorkspaceIdentity';
 import { MotionToggle, useWorkspaceMotion } from './WorkspaceMotion';
 
@@ -638,6 +640,8 @@ function DashboardLayout({
     { label: 'Invoices', to: '/invoices', icon: FileText },
     { label: 'Statistics', to: '/statistics', icon: TrendingUp },
     { label: 'Vendors', to: '/vendors', icon: Users },
+    { label: 'Mobile Users', to: '/users', icon: ShieldCheck },
+    { label: 'Animal Register', to: '/animals', icon: ClipboardList },
     { label: 'Notifications', to: '/notifications', icon: Bell, badge: unreadCount },
     { label: 'Service Computation', to: '/service-computation', icon: PiggyBank }
   ];
@@ -648,6 +652,8 @@ function DashboardLayout({
     '/invoices': 'Invoices',
     '/statistics': 'Statistics',
     '/vendors': 'Vendors',
+    '/users': 'Mobile Users',
+    '/animals': 'Animal Register',
     '/notifications': 'Notifications',
     '/service-computation': 'Service Computation'
   };
@@ -777,6 +783,8 @@ function DashboardLayout({
               <Route path="/statistics" element={<StatisticsPage dashboard={dashboard} recordings={slaughterRecords} invoices={invoices} />} />
               <Route path="/vendors" element={<VendorsPage vendors={vendors} records={slaughterRecords} loading={loading} addVendor={addVendor} updateVendor={updateVendor} deleteVendor={deleteVendor} showToast={showToast} />} />
               <Route path="/notifications" element={<NotificationsPage notifications={notifications} markNotificationRead={markNotificationRead} markAllNotificationsRead={markAllNotificationsRead} deleteNotification={deleteNotification} />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/animals" element={<AnimalsPage />} />
               <Route path="/service-computation" element={<ServiceComputationPage feeConfig={feeConfig} updateFees={updateFees} showToast={showToast} />} />
             </Routes>
           </main>
@@ -1391,7 +1399,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
 }
 
 function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading, addInvoice, updateInvoice, deleteInvoice, showToast, municipality }: { vendors: Vendor[]; invoices: Invoice[]; slaughterRecords: SlaughterRecord[]; feeConfig: FeeConfig[]; loading: boolean; addInvoice: (payload: any) => Promise<void>; updateInvoice: (id: string, payload: any) => Promise<void>; deleteInvoice: (id: string) => Promise<void>; showToast: (msg: string, type?: 'success' | 'error') => void; municipality?: string }) {
-  const municipalityName = municipality || 'San Fernando';
+  const municipalityName = municipality || 'Calauag';
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [search, setSearch] = useState('');

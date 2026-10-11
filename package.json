@@ -21,6 +21,8 @@
     "test:rehearsal:safety": "node --test rehearsal/safety.test.mjs",
     "rehearsal:emulators": "node rehearsal/start-emulators.mjs",
     "rehearsal:verify": "node rehearsal/verify.mjs",
+    "rehearsal:verify:accounts": "node rehearsal/verify-accounts.mjs",
+    "rehearsal:verify:animals": "node rehearsal/verify-animals.mjs",
     "rehearsal:serve": "node rehearsal/server.mjs --serve"
   },
   "dependencies": {

@@ -124,6 +124,37 @@ Adapt Android authentication/vendor invoice loading to this API. Remove reliance
 Do not change live accounts, claims, records, rules, registrations, permissions or google-services.json; do not deploy or enable billing. Do not infer real roles from historical Users.role or overwrite Users. The owner will push the result and notify this session for review before real-account connection.
 # Latest handoff: 2026-10-11 device rehearsal complete
 
+## Pause and resume handoff - 2026-10-12
+
+Owner requested saving progress and resuming later or tomorrow. Do not continue implementation during this pause.
+
+Android Codex reports inspector-only GET /api/mobile/animals/{animalId}/vendor and Android business/stall identity display implemented. Approval requires complete business/stall details, notes and explicit review acknowledgment; missing details/load errors block approval, while rejection remains available with notes. Stale decisions refresh without automatic mutation retry. Acknowledgment is a UI review step; external ownership evidence remains necessary.
+
+Reported validation (not independently verified by this web session yet): 80 Android unit test executions, four device tests, 52 server tests, 21 emulator checks; builds/lint zero errors. Updated evidence: web ANIMAL_WORKFLOW.md around line 74 and Android MOBILE_INTEGRATION_RESULTS.md around line 329. Screenshots are in Android .rehearsal-runtime/inspector-identity-screenshots/animal-milestone, notably 11-inspector-business-identity.png and 09-missing-stall-blocks-approval.png. Android remains on isolated-mobile-integration-rehearsal. The implementing agent reports no commit, push, deployment or production configuration change for this latest milestone.
+
+Next steps when the owner resumes:
+
+1. Read the latest changes in both repositories and saved test reports. Independently review inspector-only authorization, scoped linked-business validation, private-field exclusion, missing-stall approval blocking, corrections/conflicts, and stale-response/account-switch clearing. Inspect the screenshots. Repeat only checks needed to resolve concrete gaps.
+2. Fix any verified defects, summarize review results and prepare separate source/test/document commits for web and Android. Keep secrets, runtime screenshots/logs, generated artifacts and local.properties excluded. Do not assume the latest work has been pushed.
+3. Proceed to staff billing: approved animal revision -> authoritative vendor invoice -> web billing history. First review/confirm municipal rates, charge basis, invoice numbering, and which staff functions may issue bills. Implement duplicate prevention, transactional approval/revision binding, multiple-vendor isolation and amount/report tests using synthetic data.
+4. Payment recording/receipts and delivery/GPS follow as separate milestones. Real-user activation, hosting, index deployment and production switches require concrete review and authorization; live writes remain paused until then.
+
+Resume cue: "Resume from SESSION_RESUME.md and review the inspector vendor-identity milestone first."
+
+## Current milestone: staff functions and animal inspection foundation
+
+Owner clarified professor requirements: staff generate vendor bills recorded in the web; delivery tracking should follow the slaughterhouse-to-Calauag-market route; one inspector verifies and approves (two independent inspectors are not required). Owner authorized starting now. First implemented milestone is explicit inventory/billing/delivery staff functions, individual animal ownership/weight recording, corrections and inspector decisions. Billing issuance and GPS are next milestones, not completed by this work.
+
+See ANIMAL_WORKFLOW.md for API contract and Android handoff. Web Animal Register is /animals; mobile endpoints are /api/mobile/animals, with active membership/claims/scope checks, inventory-only recording, inspector-only decisions, own-vendor reads, scoped vendor selection and transactional audit/revision handling. Corrections clear approval. Staff permission editing is available in Mobile Users but does not activate pending memberships.
+
+Latest checks: 47 server tests passed; 18 account emulator checks and 16 animal emulator checks passed. Typecheck/build passed. Interactive web walkthrough and Android operational screens/device tests for this new milestone remain pending. Live account management, animal workflow and official billing gates remain disabled. No live Firebase changes, deployment, commit or push occurred. Existing administrator UID remains administrator; its vendor pilot is demo-only. Municipality and scope are confirmed Calauag / ph-quezon-calauag; older undecided statements below are historical.
+
+## Treasurer account management implementation
+
+Latest continuation: owner confirmed **Municipality of Calauag, Quezon, Philippines**, correcting “Municipal” to “Municipality.” Source defaults now use Calauag and scope `ph-quezon-calauag`. Mobile Users adds business registration with market/section/stall assignment, stable server vendor IDs, duplicate stall prevention and optional personal contact number (no SMS). 36 server tests and 16 emulator account/business checks passed; typecheck/build passed. Account management remains default-disabled, and no live Firebase account, business, index or invitation was created. Stall reassignment, Staff/Inspector operational access, real email delivery and production Android/API activation remain pending. Work is still uncommitted/unpushed.
+
+Owner authorized building web-created Vendor, Staff and Inspector accounts. `src/UsersPage.tsx` and `server/accounts.js` implement creation, invitations, bounded account/business lists, audit history and deactivation. See `ACCOUNT_MANAGEMENT.md`. Account management has a separate default-disabled environment gate; billing remains paused. Existing Auth identities are not adopted automatically. Staff/Inspector memberships stay pending. 34 server tests, frontend typecheck/build and 14 real local emulator account checks passed. New work is uncommitted/unpushed. Live Firebase/configuration remains unchanged. The user chose demo-only for their own vendor pilot and deferred the municipality decision; do not provision their actual administrator UID as a vendor.
+
 Android repo is `C:\Users\Acer\AndroidStudioProjects\Capsto-Project`. Its review branch `isolated-mobile-integration-rehearsal` is pushed at `8c70915`; local and GitHub hashes were verified. Saved instrumentation XML shows 2 tests, zero failures/errors/skips on isolated `Mobile_Rehearsal` AVD, Android 17/API 37. Original Pixel AVD lacked C: disk space; successful testing used generated AVD state on D:. Production Firebase remains unchanged.
 
 Current release preparation is described in `REAL_MOBILE_RELEASE_PLAN.md`. Awaiting owner answers: pilot vendor UID/business ownership and municipality name/scope. Do not assume the existing web administrator owns a vendor business. Live provisioning, deployment, Android production project switch and official billing remain pending concrete review and authorization. Earlier pending device-test and missing-mobile-folder entries below are historical.

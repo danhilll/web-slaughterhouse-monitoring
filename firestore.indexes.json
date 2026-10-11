@@ -1,6 +1,39 @@
 {
   "indexes": [
     {
+      "collectionGroup": "animal_audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "animalId", "order": "ASCENDING" },
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "animal_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "vendorBusinessId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "account_audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetUid", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vendors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "slaughter_records",
       "queryScope": "COLLECTION",
       "fields": [
