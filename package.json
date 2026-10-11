@@ -3,7 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
     "dev:client": "vite --host 0.0.0.0 --port 5173",
@@ -11,11 +13,15 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "check:server": "node --check server/index.js && node --check server/access.js && node --check scripts/seed-firestore.js && node --check scripts/check-firebase-connection.js && node --check scripts/inspect-firestore-shape.js && node --check scripts/publish-firestore-lockdown.js && node --check scripts/check-firestore-lockdown.js",
+    "check:server": "node --check server/index.js && node --check server/access.js && node --check server/mobile.js && node --check scripts/seed-firestore.js && node --check scripts/check-firebase-connection.js && node --check scripts/inspect-firestore-shape.js && node --check scripts/publish-firestore-lockdown.js && node --check scripts/check-firestore-lockdown.js",
     "check:firebase": "node scripts/check-firebase-connection.js",
     "inspect:firestore": "node scripts/inspect-firestore-shape.js",
     "test:server": "node --test server/*.test.js",
-    "verify": "npm run typecheck && npm run check:server && npm run test:server && node scripts/seed-firestore.js --dry-run && npm run build"
+    "verify": "npm run typecheck && npm run check:server && npm run test:server && node scripts/seed-firestore.js --dry-run && npm run build",
+    "test:rehearsal:safety": "node --test rehearsal/safety.test.mjs",
+    "rehearsal:emulators": "node rehearsal/start-emulators.mjs",
+    "rehearsal:verify": "node rehearsal/verify.mjs",
+    "rehearsal:serve": "node rehearsal/server.mjs --serve"
   },
   "dependencies": {
     "cors": "^2.8.5",

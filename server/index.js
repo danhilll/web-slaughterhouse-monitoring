@@ -3,6 +3,7 @@ import cors from 'cors';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createWebAdminMiddleware, createWriteGuard, parseAdminUids } from './access.js';
+import { createMobileRouter, createMobileFirestoreStore } from './mobile.js';
 
 const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -669,6 +670,11 @@ app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
+// Mobile router is terminal and precedes the unchanged administrator guard.
+app.use('/api/mobile', createMobileRouter({
+  getAuth: () => firebaseAuth,
+  store: createMobileFirestoreStore(() => firestoreDb)
+}));
 app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
 app.use('/api', createWriteGuard(WEB_WRITES_ENABLED));
 app.use('/api', express.json({ limit: '64kb' }));

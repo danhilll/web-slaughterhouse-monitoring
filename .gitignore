@@ -10,3 +10,7 @@ dist
 *service-account*.json
 .DS_Store
 npm-debug.log*
+
+# Isolated emulator runtime output
+.rehearsal-runtime/
+*-debug.log
