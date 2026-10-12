@@ -45,6 +45,7 @@ import type { WebSession } from './AuthGate';
 import { apiFetch } from './api';
 import { UsersPage } from './UsersPage';
 import { AnimalsPage } from './AnimalsPage';
+import { OperationsPage } from './OperationsPage';
 import { AmbientBackdrop, LedgerArtwork, WorkspaceBrand } from './WorkspaceIdentity';
 import { MotionToggle, useWorkspaceMotion } from './WorkspaceMotion';
 
@@ -642,6 +643,7 @@ function DashboardLayout({
     { label: 'Vendors', to: '/vendors', icon: Users },
     { label: 'Mobile Users', to: '/users', icon: ShieldCheck },
     { label: 'Animal Register', to: '/animals', icon: ClipboardList },
+    { label: 'Animal Billing & Delivery', to: '/operations', icon: ClipboardList },
     { label: 'Notifications', to: '/notifications', icon: Bell, badge: unreadCount },
     { label: 'Service Computation', to: '/service-computation', icon: PiggyBank }
   ];
@@ -654,6 +656,7 @@ function DashboardLayout({
     '/vendors': 'Vendors',
     '/users': 'Mobile Users',
     '/animals': 'Animal Register',
+    '/operations': 'Animal Billing & Delivery',
     '/notifications': 'Notifications',
     '/service-computation': 'Service Computation'
   };
@@ -785,6 +788,7 @@ function DashboardLayout({
               <Route path="/notifications" element={<NotificationsPage notifications={notifications} markNotificationRead={markNotificationRead} markAllNotificationsRead={markAllNotificationsRead} deleteNotification={deleteNotification} />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/animals" element={<AnimalsPage />} />
+<Route path="/operations" element={<OperationsPage />} />
               <Route path="/service-computation" element={<ServiceComputationPage feeConfig={feeConfig} updateFees={updateFees} showToast={showToast} />} />
             </Routes>
           </main>

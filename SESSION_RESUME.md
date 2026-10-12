@@ -126,6 +126,10 @@ Do not change live accounts, claims, records, rules, registrations, permissions 
 
 ## Pause and resume handoff - 2026-10-12
 
+Resumed on 2026-10-12: reviewed actual inspector identity server transaction/role guard and Android identity/acknowledgment clearing, including stale revision handling. Fresh full server run passed 52 tests (15 animal tests). Saved Android XML confirms 40 debug + 40 rehearsal tests, zero failures/errors; saved device log confirms four tests passed; lint XML has 50 warnings and no errors. Inspected missing-stall screenshot and confirmed the municipal-review state. Current local commits are web afa8555 and Android 50cc7f1; both working trees were clean before this resume note. Remote push status of these latest commits was not checked in this resume turn.
+
+The attempted fresh animal emulator verification was stopped because no listeners were present on 9199/8180; the previous 21-check result remains reported evidence, not a fresh run. No services were started, real data accessed or live configuration changed. Asked owner for official Calauag fee schedule, per-animal/per-kilogram charge basis and invoice-number format, with demo-only billing as an option. Billing implementation has not started during this resume review; awaiting that choice/details. Production approval does not validate Android's ephemeral ownership acknowledgment; it remains a UI review step as documented.
+
 Owner requested saving progress and resuming later or tomorrow. Do not continue implementation during this pause.
 
 Android Codex reports inspector-only GET /api/mobile/animals/{animalId}/vendor and Android business/stall identity display implemented. Approval requires complete business/stall details, notes and explicit review acknowledgment; missing details/load errors block approval, while rejection remains available with notes. Stale decisions refresh without automatic mutation retry. Acknowledgment is a UI review step; external ownership evidence remains necessary.
@@ -159,3 +163,11 @@ Android repo is `C:\Users\Acer\AndroidStudioProjects\Capsto-Project`. Its review
 
 Current release preparation is described in `REAL_MOBILE_RELEASE_PLAN.md`. Awaiting owner answers: pilot vendor UID/business ownership and municipality name/scope. Do not assume the existing web administrator owns a vendor business. Live provisioning, deployment, Android production project switch and official billing remain pending concrete review and authorization. Earlier pending device-test and missing-mobile-folder entries below are historical.
 
+
+## Android billing/payment/delivery milestone completed locally — 2026-10-12
+
+Android remains isolated-mobile-integration-rehearsal at 50cc7f1; web remains fix/foundation-up at afa8555. Existing SESSION_RESUME.md and separately appearing .env.example changes were preserved. New local source implements one invoice per approved animal, integer-centavo server fees, unique full-payment receipt recording, assigned staff delivery status and explicit foreground location sharing. Web /operations displays history. See BILLING_DELIVERY_WORKFLOW.md and Android MOBILE_INTEGRATION_RESULTS.md for the current contract; older pending Android/billing statements are superseded for rehearsal.
+
+Normal server operations mounting is default-disabled and also requires a demo project plus loopback Auth/Firestore hosts, preventing live activation by a flag alone. Synthetic schedule/numbering only; official rates, payment rules, reversals, live account activation/indexes/hosting and physical-device validation remain pending separately authorized work. No production Firebase/configuration/rules/index changes, fixture reset, staging, commit, push, merge or deployment. PR #1 has only the earlier committed changes; this milestone is local and uncommitted.
+
+Validation: 62 server tests; 20 actual operations-emulator checks with test-owned cleanup; 48 Android unit tests per variant / 96 executions; all five device tests including injected synthetic foreground GPS sharing and vendor read-only workflow; builds, web typecheck/build and lint (0 errors / 50 warnings) passed. The prior 21 animal emulator checks remain saved evidence unless rerun explicitly. Local loopback Auth/Firestore/invoice/animal services are available; do not reset them. Use Mobile Synthetic Rehearsal, never the production app, for demo accounts.

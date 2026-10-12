@@ -6,6 +6,7 @@ import { createWebAdminMiddleware, createWriteGuard, parseAdminUids } from './ac
 import { createMobileRouter, createMobileFirestoreStore } from './mobile.js';
 import { createAccountsRouter, createAccountStore, createFirebaseInvitationSender } from './accounts.js';
 import { createAnimalRouter, createAnimalStore, createAnimalMobileAuth } from './animals.js';
+import { createOperationsRouter, createOperationsStore, syntheticOperationsEnabled } from './operations.js';
 
 const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -675,15 +676,23 @@ app.use('/api', (req, res, next) => {
 // Mobile router is terminal and precedes the unchanged administrator guard.
 const animalStore = createAnimalStore(() => firestoreDb);
 const animalWorkflowEnabled = process.env.ANIMAL_WORKFLOW_ENABLED === 'true';
+const operationsEnabled = syntheticOperationsEnabled(process.env, firestoreDb?.projectId);
+const operationsStore = createOperationsStore(() => firestoreDb);
+app.use('/api/mobile/operations', express.json({ limit: '16kb' }), createAnimalMobileAuth(() => firebaseAuth, animalStore),
+  createOperationsRouter({ store: operationsStore, animalStore, enabled: animalWorkflowEnabled && operationsEnabled, getPrincipal: req => req.animalUser }));
 const municipalScope = process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag';
 app.use('/api/mobile/animals', express.json({ limit: '16kb' }),
   createAnimalMobileAuth(() => firebaseAuth, animalStore),
-  createAnimalRouter({ store: animalStore, enabled: animalWorkflowEnabled, getPrincipal: req => req.animalUser }));
+  createAnimalRouter({ store: animalStore, enabled: animalWorkflowEnabled, operationsEnabled, getPrincipal: req => req.animalUser }));
 app.use('/api/mobile', createMobileRouter({
   getAuth: () => firebaseAuth,
   store: createMobileFirestoreStore(() => firestoreDb)
 }));
 app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
+app.use('/api/operations', express.json({ limit: '16kb' }), createOperationsRouter({
+  store: operationsStore, animalStore, enabled: animalWorkflowEnabled && operationsEnabled,
+  getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
+}));
 app.use('/api/animals', express.json({ limit: '16kb' }), createAnimalRouter({
   store: animalStore, enabled: animalWorkflowEnabled,
   getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
@@ -1055,6 +1064,9 @@ app.post('/api/service-fees', asyncHandler(async (req, res) => {
 }));
 
 app.patch('/api/invoices/:id', asyncHandler(async (req, res) => {
+  const protectedInvoice = await store.getInvoice(req.params.id);
+  if (protectedInvoice?.workflow === 'animal') return res.status(409).json({ message: 'Animal invoices require the audited billing/payment workflow. Direct edits and deletion are unavailable.' });
+
   const allowedStatus = PAYMENT_STATUSES;
   if (req.body.payment_status && !allowedStatus.includes(req.body.payment_status)) {
     return res.status(400).json({ message: 'Invalid payment status.' });
@@ -1092,6 +1104,9 @@ app.patch('/api/invoices/:id', asyncHandler(async (req, res) => {
 }));
 
 app.delete('/api/invoices/:id', asyncHandler(async (req, res) => {
+  const protectedInvoice = await store.getInvoice(req.params.id);
+  if (protectedInvoice?.workflow === 'animal') return res.status(409).json({ message: 'Animal invoices require the audited billing/payment workflow. Direct edits and deletion are unavailable.' });
+
   const deleted = await store.deleteInvoice(req.params.id);
   if (!deleted) return res.status(404).json({ message: 'Invoice not found.' });
   res.json({ success: true });

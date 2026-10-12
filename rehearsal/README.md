@@ -88,3 +88,11 @@ Keep jar/runtime directories, logs, APKs, build output, `.env`, service accounts
 ## Account and animal API verification
 
 With the guarded Auth/Firestore emulators already running and both emulator hosts explicitly set as above, run `npm run rehearsal:verify:accounts` (18 checks) and `npm run rehearsal:verify:animals` (16 checks). These scripts create uniquely named synthetic users and scoped records, test actual API/Auth/Firestore behavior, and clean up only their own fixtures. They do not reset the running demo or send real setup emails. Read ACCOUNT_MANAGEMENT.md and ANIMAL_WORKFLOW.md for the contract and pending activation steps.
+
+## Android-owned billing/payment/delivery rehearsal — 2026-10-12
+
+Read BILLING_DELIVERY_WORKFLOW.md and the Android rehearsal/README.md. The Android adapter mounts the actual operations router on port 5003, with reserved synthetic billing@rehearsal.example.test and delivery@rehearsal.example.test (public password Synthetic-only-42!). The identity vendor can inspect its own receipt/delivery through the Android Payments & deliveries action.
+
+To preserve fixtures, start the Android `rehearsal/invoice-server.mjs` wrapper on 5002 with the documented mandatory demo/loopback environment; it calls startRehearsal({seedData:false}). Optional --add-missing-demo-fixtures creates only absent reserved demo documents/accounts, without overwriting existing values. Do not use reset-style verification or the ordinary rehearsal:serve startup during a preserved walkthrough. Guarded emulator launch remains as documented above.
+
+Android `node rehearsal/verify-operations.mjs` (MOBILE_WEB_REPOSITORY set to this checkout) passed 20 actual Auth/Firestore checks using a unique scope and test-owned cleanup only. New server suite total: 62. Android: 96 unit executions, five full device tests, builds passed, lint zero errors / 50 warnings. Web typecheck/build passed. Physical GPS and browser walkthroughs remain unverified; the foreground device GPS test used an injected synthetic emulator fix. Runtime, configuration and live Firebase stay excluded/unchanged.

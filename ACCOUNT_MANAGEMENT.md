@@ -54,3 +54,7 @@ Do not enable in live configuration yet. Review the exact changes first:
 - `npm run rehearsal:verify:accounts`: 18 checks passed with real local Firebase Auth and Firestore. Tests register a unique synthetic business through the API, reject duplicate normalized stalls, create identities without resetting the running mobile demo, consume a local setup code, sign in to the mobile API and verify denial after deactivation, including rejection of late setup completion. Staff function assignment/reassignment persists in both protected documents without activating pending access. Test-owned records are removed afterward.
 
 Run the emulator verification with both hosts explicitly set to `127.0.0.1:9199` and `127.0.0.1:8180`, after the documented guarded emulator launcher has finished starting. Never use live credentials or run it against production. UI typechecking/build completed; an interactive browser walkthrough of the Users page is still required.
+
+## Android operational rehearsal update — 2026-10-12
+
+Inventory, inspector, billing and delivery Android screens are now implemented in the isolated synthetic rehearsal. Billing/delivery depend on the new operations router; see BILLING_DELIVERY_WORKFLOW.md. Account creation still leaves staff/inspectors pending, assignment does not activate real users, and real activation remains separately reviewed work. Only reserved synthetic billing/delivery memberships were activated in the Firebase emulator; the account-management API's provisioning policy is unchanged.
