@@ -118,16 +118,18 @@ export function createOperationsStore(getDb) {
 export function createOperationsRouter({store,animalStore,enabled=false,getPrincipal,cursorSecret=randomBytes(32),now=()=>new Date().toISOString()}) {
   const router=Router();
   router.use((req,res,next)=>{res.set('Cache-Control','no-store');const p=getPrincipal(req);if(!p||!id(p.uid)||!id(p.municipalScopeId))return res.status(403).json({message:'Authorized municipal access is required.'});req.principal=p;next();});
+  router.use((req,res,next)=>{req.operationsEnabled=typeof enabled==='function'?enabled():enabled;next();});
   router.use((req,res,next)=>req.method!=='GET'&&Object.keys(req.query).length?res.status(400).json({message:'Unsupported workflow filter.'}):next());
   const run=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){if(e.retryAfter)res.set('Retry-After',String(e.retryAfter));res.status(e.status||503).json({message:e.status?e.message:'Workflow unavailable. Refresh before retrying.'});}};
   router.get('/settings',run(async(req,res)=>{
+    const enabled=req.operationsEnabled;
     const p=req.principal,canBill=permission(p,'billing'),canDeliver=permission(p,'delivery');
     if(!canBill&&!canDeliver&&p.role!=='vendor')throw fail(403,'Billing or delivery permission is required.');
     let feeSchedule=null,feeMessage=null;
     if(enabled&&canBill)try{feeSchedule=await store.schedule(p.municipalScopeId);}catch(e){if(e.status!==503)throw e;feeMessage='An approved fee schedule is required.';}
     res.json({enabled,canBill,canDeliver,feeSchedule,feeMessage});
   }));
-  router.use((req,res,next)=>enabled?next():res.status(503).json({message:'Billing, payment and delivery workflows are awaiting pilot activation.'}));
+  router.use((req,res,next)=>req.operationsEnabled?next():res.status(503).json({message:'Billing, payment and delivery workflows are awaiting pilot activation.'}));
   const sign=value=>createHmac('sha256',cursorSecret).update(value).digest('base64url');
   const binding=(p,kind)=>JSON.stringify([p.uid,p.role,p.municipalScopeId,p.vendorBusinessId||'',kind]);
   const encode=(p,after,kind)=>{const data=Buffer.from(JSON.stringify({binding:binding(p,kind),after,expires:Date.now()+3600000})).toString('base64url');return `${data}.${sign(data)}`;};

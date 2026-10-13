@@ -103,7 +103,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
   const router=Router();
   router.param('id',(req,res,next,value)=>validId(value)?next():res.status(400).json({message:'Invalid animal ID.'}));
   router.use((req,res,next)=>{res.set('Cache-Control','no-store');const p=getPrincipal(req);if(!p||!validId(p.uid)||!validId(p.municipalScopeId))return res.status(403).json({message:'Authorized municipal access is required.'});req.animalPrincipal=p;next();});
-  router.get('/settings',(req,res)=>res.json({enabled,canRecord:inventory(req.animalPrincipal),canInspect:req.animalPrincipal.role==='inspector',billingAvailable:enabled&&operationsEnabled&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false}));
+  router.get('/settings',(req,res)=>res.json({enabled,canRecord:inventory(req.animalPrincipal),canInspect:req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false}));
   router.use((req,res,next)=>enabled?next():res.status(503).json({message:'Animal workflow is awaiting pilot activation.'}));
   const run=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.status||503).json({message:e.status?e.message:'Animal operation failed. Refresh the record before retrying.'});}};
   const signed=value=>createHmac('sha256',cursorSecret).update(value).digest('base64url');

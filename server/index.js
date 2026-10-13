@@ -676,10 +676,10 @@ app.use('/api', (req, res, next) => {
 // Mobile router is terminal and precedes the unchanged administrator guard.
 const animalStore = createAnimalStore(() => firestoreDb);
 const animalWorkflowEnabled = process.env.ANIMAL_WORKFLOW_ENABLED === 'true';
-const operationsEnabled = syntheticOperationsEnabled(process.env, firestoreDb?.projectId);
+const operationsEnabled = () => syntheticOperationsEnabled(process.env, firestoreDb?.projectId);
 const operationsStore = createOperationsStore(() => firestoreDb);
 app.use('/api/mobile/operations', express.json({ limit: '16kb' }), createAnimalMobileAuth(() => firebaseAuth, animalStore),
-  createOperationsRouter({ store: operationsStore, animalStore, enabled: animalWorkflowEnabled && operationsEnabled, getPrincipal: req => req.animalUser }));
+  createOperationsRouter({ store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(), getPrincipal: req => req.animalUser }));
 const municipalScope = process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag';
 app.use('/api/mobile/animals', express.json({ limit: '16kb' }),
   createAnimalMobileAuth(() => firebaseAuth, animalStore),
@@ -690,7 +690,7 @@ app.use('/api/mobile', createMobileRouter({
 }));
 app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
 app.use('/api/operations', express.json({ limit: '16kb' }), createOperationsRouter({
-  store: operationsStore, animalStore, enabled: animalWorkflowEnabled && operationsEnabled,
+  store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(),
   getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
 }));
 app.use('/api/animals', express.json({ limit: '16kb' }), createAnimalRouter({
