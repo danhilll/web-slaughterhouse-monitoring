@@ -1,5 +1,7 @@
 # Isolated mobile emulator rehearsal
 
+For the complete inventory -> inspector -> billing -> delivery -> vendor -> web walkthrough, read ALL_ROLE_DEMO.md. The separate synthetic web history panel is started with `npm run rehearsal:web` after both emulator-host variables and the demo project are explicitly configured. It serves port 5174 and proxy/API port 5004, reuses the actual web OperationsPage, and leaves the normal web application and .env unchanged. Never sign into this panel with a real account.
+
 Account creation rehearsal: after the emulators finish starting, run `npm.cmd run rehearsal:verify:accounts` with the same two emulator-host variables. It validates treasurer-managed setup, local password invitations, mobile login and deactivation using unique synthetic records without resetting an active walkthrough. See `ACCOUNT_MANAGEMENT.md` for the account workflow and live activation prerequisites.
 
 Uses only `demo-mobile-rehearsal`: Auth `127.0.0.1:9199`, Firestore `127.0.0.1:8180`, real mobile Express router `127.0.0.1:5002`. Never start `server/index.js`, `npm run dev`, production seeding/inspection/deployment scripts or the ordinary Android debug application for this rehearsal.

@@ -23,7 +23,8 @@
     "rehearsal:verify": "node rehearsal/verify.mjs",
     "rehearsal:verify:accounts": "node rehearsal/verify-accounts.mjs",
     "rehearsal:verify:animals": "node rehearsal/verify-animals.mjs",
-    "rehearsal:serve": "node rehearsal/server.mjs --serve"
+    "rehearsal:serve": "node rehearsal/server.mjs --serve",
+    "rehearsal:web": "node rehearsal/web-demo.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

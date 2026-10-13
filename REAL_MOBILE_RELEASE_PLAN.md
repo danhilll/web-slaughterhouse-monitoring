@@ -1,5 +1,21 @@
 # Real mobile access: release preparation
 
+## Latest review - 2026-10-12
+
+Android Windows checkout and GitHub branch match at `1c0742d` on `isolated-mobile-integration-rehearsal`. The reviewed Mac fix checks operations settings when staff have no animal capabilities; an expected operations 403 retains the denied-access result, and billing/delivery staff route to Operations. A fresh web server run passed 62 tests. The Mac reports its focused device test and full five-test suite passed; this session has not repeated the device suite.
+
+The prototype now includes animal registration/inspection and synthetic invoice/payment/delivery workflows. Older statements below about missing staff endpoints are historical. The confirmed municipality/scope is Municipality of Calauag, Quezon, Philippines / `ph-quezon-calauag`. Demo rates were explicitly selected; they are not official charges.
+
+Current real-pilot blockers verified from source:
+
+- Production Android configuration still points to `slaughterhouse-app-895d2`, not the web's `com-slaughterhouse-app`.
+- No default mobile API URL is configured; release builds require an approved HTTPS origin.
+- Billing/payment/delivery operations require a demo project plus emulator hosts; they cannot be enabled on the real municipal project by a feature flag.
+- New staff/inspector accounts remain pending; an approved activation procedure is still required.
+- First real pilot email, role and confirmed vendor business/stall (if applicable) have been requested. The owner's earlier vendor choice remains demo-only unless explicitly changed.
+
+Next sequence: approve pilot identity/ownership -> prepare exact account/configuration preview -> choose and validate reachable API hosting and required indexes -> review Android municipal app registration/configuration -> approve targeted activation -> test login/read isolation/logout/deactivation on a physical phone. Real billing remains excluded until official fee and numbering rules are confirmed and the production workflow is separately implemented/reviewed. Never import synthetic identities, invoices or receipts into live data.
+
 Updated: 2026-10-11. Target Firebase project: `com-slaughterhouse-app`.
 
 ## Evidence and current boundaries

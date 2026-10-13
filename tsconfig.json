@@ -19,6 +19,6 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src"],
+  "include": ["src", "rehearsal/web-demo.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
