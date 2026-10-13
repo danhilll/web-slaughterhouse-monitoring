@@ -17,6 +17,7 @@
     "check:firebase": "node scripts/check-firebase-connection.js",
     "inspect:firestore": "node scripts/inspect-firestore-shape.js",
     "test:server": "node --test server/*.test.js",
+    "test:tracking-ui": "node --experimental-strip-types --test src/trackingPolling.test.ts",
     "verify": "npm run typecheck && npm run check:server && npm run test:server && node scripts/seed-firestore.js --dry-run && npm run build",
     "test:rehearsal:safety": "node --test rehearsal/safety.test.mjs",
     "rehearsal:emulators": "node rehearsal/start-emulators.mjs",
@@ -24,6 +25,7 @@
     "rehearsal:verify:accounts": "node rehearsal/verify-accounts.mjs",
     "rehearsal:verify:animals": "node rehearsal/verify-animals.mjs",
     "rehearsal:verify:tracking": "node rehearsal/verify-tracking.mjs",
+    "rehearsal:verify:existing-tracking": "node rehearsal/verify-existing-tracking.mjs",
     "rehearsal:serve": "node rehearsal/server.mjs --serve",
     "rehearsal:web": "node rehearsal/web-demo.mjs"
   },
@@ -33,6 +35,7 @@
     "firebase": "^12.19.0",
     "firebase-admin": "^14.5.0",
     "jspdf": "^2.5.1",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -41,6 +44,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.21",
     "@types/node": "^22.10.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

@@ -49,6 +49,17 @@ test('tracking authorization excludes other vendors, unassigned staff and non-de
   assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery2',b)).status,403);assert.equal((await f.call(`/invoices/${id}/tracking`,'bob')).status,404);assert.equal((await f.call(`/invoices/${id}/tracking`,'other',b)).status,403);
   f.memberships.delivery.status='inactive';assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery',b)).status,403);
 });
+
+test('vendor map reads remain isolated after completion and membership removal',async t=>{
+  const f=await fixture(t),id=await inTransit(f),path=`/invoices/${id}/tracking`;
+  assert.equal((await f.call(path,'delivery',{latitude:13.96,longitude:122.29,accuracyMeters:12,capturedAt:new Date().toISOString()})).status,200);
+  assert.equal((await f.call(`/invoices/${id}/delivery/status`,'delivery',{expectedRevision:4,status:'delivered',notes:'Test completion'})).status,200);
+  const own=await f.call(path,'alice');
+  assert.equal(own.status,200);assert.equal(own.body.trackingState,'completed');assert.equal(own.body.location.latitude,13.96);
+  const other=await f.call(path,'bob');assert.equal(other.status,404);assert.equal(other.body.location,undefined);
+  f.memberships.alice.status='inactive';const revoked=await f.call(path,'alice');
+  assert.equal(revoked.status,403);assert.equal(revoked.body.location,undefined);
+});
 test('tracking rate and ordering persist across requests; identical retries are no-op',async t=>{
   let at='2026-10-13T02:00:00.000Z';const f=await fixture(t,true,()=>at),id=await inTransit(f),path=`/invoices/${id}/tracking`,b={latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:at};
   assert.equal((await f.call(path,'delivery',b)).status,200);assert.equal((await f.call(path,'delivery',b)).body.duplicate,true);
