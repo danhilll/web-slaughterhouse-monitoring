@@ -1,5 +1,7 @@
 # Animal billing, recorded payments and delivery — synthetic rehearsal
 
+Tracking follow-up (2026-10-13): read TRACKING_API.md. Automatic clients now have a separate latest-position GET/POST channel that does not advance invoice revisions or create a full financial audit per GPS point. The old manual endpoint delegates to this storage and mirrors its position for existing viewers without changing invoice revision. The earlier description below of every location update as an audited invoice revision is superseded. The web can poll one selected delivery; Android foreground automation remains pending its handoff.
+
 Implemented 2026-10-12. This completes the basic rehearsal workflow after animal inspection. Official municipal rates, invoice/receipt numbering, cash-handling rules and a production pilot remain unapproved. No live Firebase changes or deployment occurred.
 
 ## Simple workflow

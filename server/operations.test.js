@@ -16,7 +16,7 @@ test('feature flag cannot enable the new workflows on a live project or remote e
   assert.equal(syntheticOperationsEnabled({...env,FIREBASE_AUTH_EMULATOR_HOST:undefined},'demo-test'),false);
   assert.equal(syntheticOperationsEnabled({...env,ANIMAL_OPERATIONS_ENABLED:'false'},'demo-test'),false);
 });
-async function fixture(t,enabled=true) {
+async function fixture(t,enabled=true,now=()=>new Date().toISOString()) {
   const rows=new Map();let sequence=0,queue=Promise.resolve();
   const snap=ref=>({exists:rows.has(ref.path),id:ref.path.split('/').at(-1),data:()=>structuredClone(rows.get(ref.path))});
   const doc=path=>({path,get:async()=>snap({path})});
@@ -29,11 +29,59 @@ async function fixture(t,enabled=true) {
   const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
   const animalStore={membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
   const store=createOperationsStore(()=>db),app=express();
-  app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,getPrincipal:req=>req.animalUser}));
+  app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,getPrincipal:req=>req.animalUser}));
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const call=async(path,who='billing',body)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/operations${path}`,{method:body?'POST':'GET',headers:{...(who?{Authorization:`Bearer ${who}`} : {}),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
   return {rows,memberships,call};
 }
+async function inTransit(f){const inv=(await f.call('/animals/ANM-A/invoice','billing',bill)).body;await f.call(`/invoices/${inv.id}/payment`,'billing',payment(1));await f.call(`/invoices/${inv.id}/delivery`,'delivery',{expectedRevision:2,assigneeUid:'delivery',destination:'Synthetic market'});await f.call(`/invoices/${inv.id}/delivery/status`,'delivery',{expectedRevision:3,status:'in_transit',notes:'Departed'});return inv.id;}
+
+test('tracking updates one position without changing financial revision or audit',async t=>{
+  const f=await fixture(t),id=await inTransit(f),before=structuredClone(f.rows.get(`invoices/${id}`));
+  const auditBefore=[...f.rows.keys()].filter(k=>k.startsWith('operation_audit/')).length;
+  const result=await f.call(`/invoices/${id}/tracking`,'delivery',{latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:new Date().toISOString()});
+  assert.equal(result.status,200);assert.equal(result.body.trackingState,'recent');assert.deepEqual(f.rows.get(`invoices/${id}`),before);assert.equal([...f.rows.keys()].filter(k=>k.startsWith('operation_audit/')).length,auditBefore);assert.ok(f.rows.has(`delivery_positions/${id}`));
+  const vendor=await f.call(`/invoices/${id}/tracking`,'alice');assert.equal(vendor.body.location.latitude,13.96);assert.ok(!JSON.stringify(vendor.body).includes('assigneeUid'));
+});
+test('tracking authorization excludes other vendors, unassigned staff and non-delivery roles',async t=>{
+  const f=await fixture(t),id=await inTransit(f),b={latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:new Date().toISOString()};
+  for(const who of ['alice','billing','inventory','inspector'])assert.equal((await f.call(`/invoices/${id}/tracking`,who,b)).status,403);
+  assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery2',b)).status,403);assert.equal((await f.call(`/invoices/${id}/tracking`,'bob')).status,404);assert.equal((await f.call(`/invoices/${id}/tracking`,'other',b)).status,403);
+  f.memberships.delivery.status='inactive';assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery',b)).status,403);
+});
+test('tracking rate and ordering persist across requests; identical retries are no-op',async t=>{
+  let at='2026-10-13T02:00:00.000Z';const f=await fixture(t,true,()=>at),id=await inTransit(f),path=`/invoices/${id}/tracking`,b={latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:at};
+  assert.equal((await f.call(path,'delivery',b)).status,200);assert.equal((await f.call(path,'delivery',b)).body.duplicate,true);
+  at='2026-10-13T02:00:01.000Z';assert.equal((await f.call(path,'delivery',{...b,capturedAt:at,latitude:14})).status,429);
+  at='2026-10-13T02:00:10.000Z';assert.equal((await f.call(path,'delivery',{...b,capturedAt:at,latitude:14})).status,200);
+  assert.equal((await f.call(path,'delivery',b)).status,409);assert.equal((await f.call(path,'delivery',{...b,capturedAt:at,latitude:15})).status,409);
+  assert.equal(f.rows.get(`invoices/${id}`).revision,4);
+});
+test('concurrent GPS writers have one winner without disturbing completion',async t=>{
+  const f=await fixture(t),id=await inTransit(f),at=new Date().toISOString(),b={latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:at};
+  const results=await Promise.all([f.call(`/invoices/${id}/tracking`,'delivery',b),f.call(`/invoices/${id}/tracking`,'delivery',{...b,latitude:14})]);assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+  assert.equal((await f.call(`/invoices/${id}/delivery/status`,'delivery',{expectedRevision:4,status:'delivered',notes:'Arrived'})).status,200);
+  assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery',b)).status,409);assert.equal((await f.call(`/invoices/${id}/tracking`,'alice')).body.trackingState,'completed');
+});
+test('stale position is derived without writes, and reassignment hides old coordinates',async t=>{
+  let at='2026-10-13T02:00:00.000Z';const f=await fixture(t,true,()=>at),id=await inTransit(f),path=`/invoices/${id}/tracking`;
+  await f.call(path,'delivery',{latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:at});const stored=structuredClone(f.rows.get(`delivery_positions/${id}`));
+  at='2026-10-13T02:01:00.000Z';const view=await f.call(path,'alice');assert.equal(view.body.trackingState,'stale');assert.deepEqual(f.rows.get(`delivery_positions/${id}`),stored);
+  f.rows.get(`invoices/${id}`).delivery.assigneeUid='delivery2';assert.equal((await f.call(path,'alice')).body.location,null);assert.equal((await f.call(path,'delivery')).status,404);
+});
+test('tracking rejects invalid positions, unsupported fields and filters',async t=>{
+  const f=await fixture(t),id=await inTransit(f),path=`/invoices/${id}/tracking`,b={latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:new Date().toISOString()};
+  for(const bad of [{...b,latitude:91},{...b,accuracyMeters:-1},{...b,capturedAt:'2020-01-01T00:00:00Z'},{...b,expectedRevision:4},{...b,capturedAt:'2099-01-01T00:00:00Z'}])assert.equal((await f.call(path,'delivery',bad)).status,400);
+  assert.equal((await f.call(path+'?vendor_id=OTHER','alice')).status,400);assert.equal(f.rows.has(`delivery_positions/${id}`),false);
+});
+test('tracking request bursts are bounded and invalid stored coordinates fail closed',async t=>{
+  const f=await fixture(t),id=await inTransit(f),path=`/invoices/${id}/tracking`;
+  f.rows.set(`delivery_positions/${id}`,{invoiceId:id,municipalScopeId:'SCOPE',vendor_id:'VEN-A',assigneeUid:'delivery',assignedAt:new Date().toISOString(),receivedAt:new Date().toISOString(),capturedAt:new Date().toISOString(),latitude:999,longitude:0,accuracyMeters:10});
+  assert.equal((await f.call(path,'alice')).status,503);
+  f.rows.delete(`delivery_positions/${id}`);
+  for(let n=0;n<29;n++)assert.equal((await f.call(path,'alice')).status,200);
+  assert.equal((await f.call(path,'alice')).status,429);
+});
 test('operations are independently gated and require active matching membership',async t=>{
   const {call,memberships}=await fixture(t,false);
   assert.equal((await call('/settings')).body.enabled,false);assert.equal((await call('/invoices')).status,503);

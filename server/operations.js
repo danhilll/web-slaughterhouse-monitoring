@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
+import { createTrackingStore } from './tracking.js';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const id = value => typeof value === 'string' && value === value.trim() && value.length > 0 && value.length <= 128 && !value.includes('/') && !['.', '..'].includes(value);
@@ -35,11 +36,14 @@ function scheduleView(s) {
 
 /** One invoice per approved animal revision; amounts are server-calculated integer centavos. */
 export function createOperationsStore(getDb) {
+  const tracking=createTrackingStore(getDb,validInvoice);
   const db = () => { const value = getDb(); if (!value) throw fail(503, 'Workflow storage is unavailable.'); return value; };
   const invoice = value => db().doc(`invoices/${value}`);
   const read = async (tx, ref) => { const snap = await tx.get(ref); if (!snap.exists) return null; const row = snap.data(); if (row.id !== undefined && row.id !== snap.id) throw fail(503,'Record identity requires review.'); return {...row,id:snap.id}; };
   const audited = (tx, p, row, action, at) => tx.create(db().collection('operation_audit').doc(), {invoiceId:row.id,animalId:row.animalId,municipalScopeId:p.municipalScopeId,actorUid:p.uid,action,at,after:operationInvoiceView(row)});
   return {
+    trackingRead:(value,p,at)=>tracking.read(value,p,at),
+    trackingPublish:(value,b,p,at)=>tracking.publish(value,b,p,at),
     async schedule(scope) { const s = await db().doc(`operation_fee_schedules/${scope}`).get(); return scheduleView(s.exists?s.data():null); },
     async list(p, after) {
       let q = db().collection('invoices').where('municipalScopeId','==',p.municipalScopeId).where('workflow','==','animal');
@@ -69,6 +73,10 @@ export function createOperationsStore(getDb) {
       });
     },
     async mutate(value, b, p, action, at) {
+      if(action==='delivery_location'){
+        const result=await tracking.publish(value,b,p,at,{legacy:true});
+        return {...result.row,delivery:{...result.row.delivery,location:result.view.location}};
+      }
       return db().runTransaction(async tx=>{
         const before=await read(tx,invoice(value));
         if(!scopeRead(before,p))throw fail(404,'Invoice not found.');
@@ -94,10 +102,7 @@ export function createOperationsStore(getDb) {
           const d=before.delivery;
           if(!d||p.role!=='staff'||d.assigneeUid!==p.uid||!p.staffPermissions.includes('delivery'))throw fail(403,'Only the assigned delivery staff can update this delivery.');
           if(before.payment_status!=='Paid')throw fail(409,'Delivery requires a paid invoice.');
-          if(action==='delivery_location') {
-            if(!['assigned','in_transit'].includes(d.status))throw fail(409,'This delivery no longer accepts location updates.');
-            patch={delivery:{...d,location:{latitude:b.latitude,longitude:b.longitude,accuracyMeters:b.accuracyMeters,capturedAt:b.capturedAt,receivedAt:at}}};
-          } else {
+          {
             const next={assigned:'in_transit',in_transit:'delivered'}[d.status];
             if(!next||b.status!==next)throw fail(409,'Delivery status changed. Refresh before continuing.');
             patch={delivery:{...d,status:next,notes:b.notes.trim(),updatedAt:at,...(next==='delivered'?{deliveredAt:at}:{})}};
@@ -114,7 +119,7 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
   const router=Router();
   router.use((req,res,next)=>{res.set('Cache-Control','no-store');const p=getPrincipal(req);if(!p||!id(p.uid)||!id(p.municipalScopeId))return res.status(403).json({message:'Authorized municipal access is required.'});req.principal=p;next();});
   router.use((req,res,next)=>req.method!=='GET'&&Object.keys(req.query).length?res.status(400).json({message:'Unsupported workflow filter.'}):next());
-  const run=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.status||503).json({message:e.status?e.message:'Workflow unavailable. Refresh before retrying.'});}};
+  const run=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){if(e.retryAfter)res.set('Retry-After',String(e.retryAfter));res.status(e.status||503).json({message:e.status?e.message:'Workflow unavailable. Refresh before retrying.'});}};
   router.get('/settings',run(async(req,res)=>{
     const p=req.principal,canBill=permission(p,'billing'),canDeliver=permission(p,'delivery');
     if(!canBill&&!canDeliver&&p.role!=='vendor')throw fail(403,'Billing or delivery permission is required.');
@@ -131,6 +136,26 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
   const canRead=p=>permission(p,'billing')||permission(p,'delivery')||p.role==='vendor';
   const body=(req,keys)=>{const b=req.body;if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!keys.includes(k))||keys.some(k=>b[k]===undefined))throw fail(400,'Provide only the required workflow fields.');if(!Number.isSafeInteger(b.expectedRevision)||b.expectedRevision<1)throw fail(400,'A current record revision is required.');return b;};
   router.param('id',(req,res,next,value)=>id(value)?next():res.status(400).json({message:'Invalid record ID.'}));
+  const trackingRequests=new Map();
+  const trackingLimit=(req,res,next)=>{
+    const time=Date.now(),key=req.principal.uid;let entry=trackingRequests.get(key);
+    if(!entry||time-entry.start>=60000){
+      if(trackingRequests.size>=5000){for(const [uid,item] of trackingRequests)if(time-item.start>=60000)trackingRequests.delete(uid);}
+      if(!trackingRequests.has(key)&&trackingRequests.size>=5000)return res.status(503).json({message:'Tracking is temporarily busy.'});
+      entry={start:time,count:0};trackingRequests.set(key,entry);
+    }
+    if(++entry.count>30){res.set('Retry-After',String(Math.max(1,Math.ceil((60000-(time-entry.start))/1000))));return res.status(429).json({message:'Tracking request limit reached. Wait before retrying.'});}next();
+  };
+  router.get('/invoices/:id/tracking',trackingLimit,run(async(req,res)=>{
+    if(Object.keys(req.query).length)throw fail(400,'Unsupported tracking filter.');
+    const p=req.principal;if(!(p.role==='admin'||p.role==='vendor'||p.role==='staff'&&permission(p,'delivery')))throw fail(403,'Delivery tracking access is required.');
+    res.json(await store.trackingRead(req.params.id,p,now()));
+  }));
+  router.post('/invoices/:id/tracking',trackingLimit,run(async(req,res)=>{
+    const p=req.principal;if(p.role!=='staff'||!permission(p,'delivery'))throw fail(403,'Assigned delivery permission is required.');
+    const b=req.body;if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['latitude','longitude','accuracyMeters','capturedAt'].includes(k)))throw fail(400,'Provide only location fields.');
+    const result=await store.trackingPublish(req.params.id,b,p,now());res.json({...result.view,duplicate:result.duplicate});
+  }));
   router.get('/eligible',run(async(req,res)=>{
     const p=req.principal;if(!permission(p,'billing'))throw fail(403,'Billing permission is required.');
     const rows=await animalStore.list(p,query(req,'eligible'));
@@ -171,7 +196,7 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     const b=body(req,['expectedRevision','status','notes']);if(!['in_transit','delivered'].includes(b.status)||!text(b.notes,500))throw fail(400,'Enter delivery status and confirmation notes.');
     res.json(operationInvoiceView(await store.mutate(req.params.id,b,req.principal,'delivery_status',now())));
   }));
-  router.post('/invoices/:id/delivery/location',run(async(req,res)=>{
+  router.post('/invoices/:id/delivery/location',trackingLimit,run(async(req,res)=>{
     if(!permission(req.principal,'delivery'))throw fail(403,'Delivery permission is required.');
     const b=body(req,['expectedRevision','latitude','longitude','accuracyMeters','capturedAt']);
     const captured=Date.parse(b.capturedAt),at=now(),time=Date.parse(at);
