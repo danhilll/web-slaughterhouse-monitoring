@@ -7,6 +7,7 @@ import { createMobileRouter, createMobileFirestoreStore } from './mobile.js';
 import { createAccountsRouter, createAccountStore, createFirebaseInvitationSender } from './accounts.js';
 import { createAnimalRouter, createAnimalStore, createAnimalMobileAuth } from './animals.js';
 import { createOperationsRouter, createOperationsStore, syntheticOperationsEnabled } from './operations.js';
+import { registerReadiness, registerWebAssets } from './hosting.js';
 
 const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -673,6 +674,7 @@ app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
+registerReadiness(app, () => useFirestore && Boolean(firebaseAuth));
 // Mobile router is terminal and precedes the unchanged administrator guard.
 const animalStore = createAnimalStore(() => firestoreDb);
 const animalWorkflowEnabled = process.env.ANIMAL_WORKFLOW_ENABLED === 'true';
@@ -1127,6 +1129,11 @@ app.get('/api/health', (req, res) => {
 // so web/mobile clients can parse errors uniformly via parseError().
 app.use('/api', (req, res) => {
   res.status(404).json({ message: 'API route not found.' });
+});
+
+registerWebAssets(app, {
+  enabled: process.env.SERVE_WEB === 'true',
+  directory: fileURLToPath(new URL('../dist/', import.meta.url)),
 });
 
 // Centralized error handler (must be registered after all routes).

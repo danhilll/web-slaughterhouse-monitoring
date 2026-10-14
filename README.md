@@ -31,7 +31,9 @@ A full-stack web application for a Philippine LGU slaughterhouse office, designe
 4. Open the app in your browser and sign in with an allowlisted account
    http://localhost:5173
 
-The Express API runs on http://localhost:5001. Every `/api` route requires a valid Firebase ID token from an allowlisted web administrator, including `/api/health`. Startup fails if the Admin SDK cannot reach Firestore, no admin UID is configured, or the web and server Firebase project IDs differ. The dashboard closes when the API rejects an existing session. Use `npm run verify` for local checks.
+The development Express API runs on http://localhost:5001. Web administrator endpoints require a valid Firebase ID token from an allowlisted UID, including `/api/health`. `/api/mobile` uses its own protected membership, role, scope and vendor checks. Startup fails if the Admin SDK cannot reach Firestore, no admin UID is configured, or the web and server Firebase project IDs differ. The dashboard closes when the API rejects an existing session. Use `npm run verify` for local checks.
+
+`npm start` runs Express directly with Node and honors the runtime `PORT` (default 5000). After `npm run build`, setting `SERVE_WEB=true` also serves the built frontend and SPA deep links from that same origin. Asset serving stays disabled by default; protected `/api` failures stay JSON. `/healthz` exposes only initialized startup status for provider probes; `/api/health` remains administrator-only. Running the normal start command connects to the configured Firebase project. Remaining decisions and release gates are in [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md).
 
 Once the Admin credential path is set, run `npm run check:firebase` for a read-only check of Firestore and the first configured admin UID. This command prints only connection status, not account details or credential contents.
 
