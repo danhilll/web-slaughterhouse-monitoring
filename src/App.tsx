@@ -799,18 +799,20 @@ function DashboardLayout({
 }
 
 function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: boolean; dashboard: DashboardData | null; loadError?: string; onRetry?: () => void }) {
-  const { motionEnabled } = useWorkspaceMotion();
   if (loading && !dashboard) {
-    return <LoadingDashboard />;
+    return <LoadingDashboard overview />;
   }
   if (!dashboard) {
     return (
-      <div className="card mx-auto max-w-md p-8 text-center">
-        <h3 className="text-lg font-bold">Dashboard unavailable</h3>
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{loadError || 'Could not load dashboard data.'}</p>
+      <div className="dashboard-overview card mx-auto max-w-md p-8 text-center">
+        <div role="alert">
+          <h2 className="text-lg font-bold">Dashboard unavailable</h2>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{loadError || 'Could not load dashboard data.'}</p>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Try loading the dashboard again.</p>
+        </div>
         {onRetry && (
           <button type="button" onClick={onRetry} className="btn-primary mt-4">
-            Retry
+            Retry loading dashboard
           </button>
         )}
       </div>
@@ -827,17 +829,30 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
   const hasFees = dashboard.feeBreakdown.some((fee) => fee.value > 0);
 
   return (
-    <div className="page-enter dashboard-composition space-y-6">
+    <div className="dashboard-composition dashboard-overview space-y-6">
+      <div role="status" aria-live="polite" aria-atomic="true" className={loading ? 'dashboard-feedback' : 'sr-only'}>
+        {loading ? 'Refreshing dashboard… Previously loaded data is shown below.' : ''}
+      </div>
+      {!loading && loadError && (
+        <div className="dashboard-feedback dashboard-feedback-error">
+          <div role="alert">
+            <p className="font-semibold">Could not refresh dashboard</p>
+            <p>{loadError}</p>
+            <p>Previously loaded data is shown below. Retry to get the latest records.</p>
+          </div>
+          {onRetry && <button type="button" onClick={onRetry} className="btn-secondary">Retry loading dashboard</button>}
+        </div>
+      )}
       <section className="overview-hero" aria-label="Operations overview">
         <AmbientBackdrop />
         <div className="overview-hero-copy">
           <span className="hero-kicker"><span /> {dashboard.municipality || 'Municipal'} office</span>
-          <h2>Your operations.<br /><span>One clear view.</span></h2>
-          <p>Keep track of daily activity, manage records, and stay on top of municipal billing.</p>
-          <Link to="/records" className="hero-link">Explore records <span><ArrowUpRight size={18} /></span></Link>
+          <h2>Your operations. <span>One clear view.</span></h2>
+          <p>Daily records and municipal billing at a glance.</p>
+          <Link to="/records" className="hero-link">Explore records <span><ArrowUpRight size={18} aria-hidden="true" /></span></Link>
         </div>
         <LedgerArtwork />
-        <span className="hero-caption">CLARITY IN EVERY RECORD <ArrowDownRight size={15} /></span>
+        <span className="hero-caption">CLARITY IN EVERY RECORD <ArrowDownRight size={15} aria-hidden="true" /></span>
       </section>
       <div className="section-heading"><h2>At a glance</h2><span>Current activity <span className="small-dot" /></span></div>
       <div className="metrics-grid">
@@ -846,27 +861,91 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
             <div className="metric-label">
               <span>{item.title}</span>
               <span className={`metric-icon-wrap ${item.tone === 'accent' ? 'bg-[#293019]/10 text-[#293019]' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'}`}>
-                <item.icon size={18} strokeWidth={1.6} />
+                <item.icon size={18} strokeWidth={1.6} aria-hidden="true" />
               </span>
             </div>
             <h3 className="tnum">{item.value}</h3>
             <div className="metric-footer">
-              <span className="metric-delta"><TrendingUp size={13} />{item.detail}</span>
-              <ArrowUpRight size={17} />
+              <span className="metric-delta">{item.detail}</span>
+              <ArrowUpRight size={17} aria-hidden="true" />
             </div>
           </Link>
         ))}
+      </div>
+
+      <div className="dashboard-tables" aria-busy={loading}>
+        <section className="card min-w-0 p-4 md:p-6" aria-labelledby="recent-records-heading">
+          <h2 id="recent-records-heading" className="text-lg font-semibold tracking-tight">Recent slaughter records</h2>
+          <p className="mb-4 mt-1 text-sm text-slate-600 dark:text-slate-300">Latest entries across vendors</p>
+          <div className="dashboard-table-scroll" role="region" aria-labelledby="recent-records-heading" tabIndex={0}>
+            <table className="dashboard-table">
+              <caption className="sr-only">Recent slaughter records, with date, vendor, animal type and number of heads</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Vendor</th>
+                  <th scope="col">Animal</th>
+                  <th scope="col" className="dashboard-number">Heads</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.recentSlaughterRecords.length === 0 ? (
+                  <tr><td colSpan={4} className="dashboard-empty">No recent slaughter records to display.</td></tr>
+                ) : dashboard.recentSlaughterRecords.map((record) => (
+                  <tr key={record.id}>
+                    <td className="tnum whitespace-nowrap">{formatDate(record.date)}</td>
+                    <td className="dashboard-vendor">{record.vendor_name || 'Vendor unavailable'}</td>
+                    <td>{record.animal_type}</td>
+                    <td className="dashboard-number font-semibold">{record.number_of_heads}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="card min-w-0 p-4 md:p-6" aria-labelledby="recent-invoices-heading">
+          <h2 id="recent-invoices-heading" className="text-lg font-semibold tracking-tight">Recent invoices</h2>
+          <p className="mb-4 mt-1 text-sm text-slate-600 dark:text-slate-300">Latest billing activity</p>
+          <div className="dashboard-table-scroll" role="region" aria-labelledby="recent-invoices-heading" tabIndex={0}>
+            <table className="dashboard-table">
+              <caption className="sr-only">Recent invoices, with invoice identifier, vendor, amount in Philippine pesos and payment status</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Invoice</th>
+                  <th scope="col">Vendor</th>
+                  <th scope="col" className="dashboard-number">Amount</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboard.recentInvoices.length === 0 ? (
+                  <tr><td colSpan={4} className="dashboard-empty">No recent invoices to display.</td></tr>
+                ) : dashboard.recentInvoices.map((invoice) => (
+                  <tr key={invoice.id}>
+                    <th scope="row" className="dashboard-invoice-id tnum" translate="no">{invoice.id}</th>
+                    <td className="dashboard-vendor">{invoice.vendor_name || 'Vendor unavailable'}</td>
+                    <td className="dashboard-number font-semibold">{formatCurrency(invoice.total_amount)}</td>
+                    <td>
+                      <StatusPill status={invoice.payment_status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
         <div className="card p-4 md:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-extrabold tracking-tight">Monthly slaughter volume</h3>
+              <h2 className="text-lg font-semibold tracking-tight">Monthly slaughter volume</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">Headcount per month, last 6 months</p>
             </div>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-              <BarChart3 size={18} />
+              <BarChart3 size={18} aria-hidden="true" />
             </div>
           </div>
           <div className="h-72">
@@ -888,8 +967,8 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                 <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(163,185,46,0.08)' }} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Cow" fill="url(#barCow)" radius={[8, 8, 2, 2]} isAnimationActive={motionEnabled} animationDuration={650} />
-                <Bar dataKey="Pig" fill="url(#barPig)" radius={[8, 8, 2, 2]} isAnimationActive={motionEnabled} animationDuration={650} />
+                <Bar dataKey="Cow" fill="url(#barCow)" radius={[8, 8, 2, 2]} isAnimationActive={false} />
+                <Bar dataKey="Pig" fill="url(#barPig)" radius={[8, 8, 2, 2]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
             )}
@@ -899,18 +978,18 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
         <div className="card p-4 md:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-extrabold tracking-tight">Fee type breakdown</h3>
+              <h2 className="text-lg font-semibold tracking-tight">Fee type breakdown</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">Collected per fee type</p>
             </div>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-              <PiggyBank size={18} />
+              <PiggyBank size={18} aria-hidden="true" />
             </div>
           </div>
           <div className="h-72">
             {!hasFees ? <ChartEmptyState title="A clear view of collections" message="Your fee breakdown will appear once payments are recorded." /> : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3} strokeWidth={2} className="outline-none" isAnimationActive={motionEnabled} animationDuration={650}>
+                <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3} strokeWidth={2} isAnimationActive={false}>
                   {dashboard.feeBreakdown.map((entry, index) => (
                     <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} stroke="#ffffff" strokeWidth={2} />
                   ))}
@@ -924,67 +1003,6 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="card p-4 md:p-6">
-          <h3 className="text-lg font-extrabold tracking-tight">Recent slaughter records</h3>
-          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">Latest entries across vendors</p>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                  <th className="pb-3 pr-4 font-bold">Date</th>
-                  <th className="pb-3 pr-4 font-bold">Vendor</th>
-                  <th className="pb-3 pr-4 font-bold">Animal</th>
-                  <th className="pb-3 font-bold">Heads</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dashboard.recentSlaughterRecords.length === 0 ? (
-                  <tr><td colSpan={4} className="py-6 text-center text-sm text-slate-500">No recent records.</td></tr>
-                ) : dashboard.recentSlaughterRecords.map((record) => (
-                  <tr key={record.id} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-emerald-50/50 dark:border-slate-800 dark:hover:bg-emerald-950/20">
-                    <td className="tnum py-3 pr-4">{formatDate(record.date)}</td>
-                    <td className="py-3 pr-4 font-medium">{record.vendor_name || 'N/A'}</td>
-                    <td className="py-3 pr-4">{record.animal_type}</td>
-                    <td className="tnum py-3 font-semibold">{record.number_of_heads}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="card p-4 md:p-6">
-          <h3 className="text-lg font-extrabold tracking-tight">Recent invoices</h3>
-          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">Latest billing activity</p>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                  <th className="pb-3 pr-4 font-bold">Invoice</th>
-                  <th className="pb-3 pr-4 font-bold">Vendor</th>
-                  <th className="pb-3 pr-4 font-bold">Amount</th>
-                  <th className="pb-3 font-bold">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dashboard.recentInvoices.length === 0 ? (
-                  <tr><td colSpan={4} className="py-6 text-center text-sm text-slate-500">No recent invoices.</td></tr>
-                ) : dashboard.recentInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-emerald-50/50 dark:border-slate-800 dark:hover:bg-emerald-950/20">
-                    <td className="tnum py-3 pr-4 font-medium">{invoice.id}</td>
-                    <td className="py-3 pr-4">{invoice.vendor_name || 'N/A'}</td>
-                    <td className="tnum py-3 pr-4 font-semibold">{formatCurrency(invoice.total_amount)}</td>
-                    <td className="py-3">
-                      <StatusPill status={invoice.payment_status} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -2451,10 +2469,12 @@ function Pagination({ page, totalPages, total, pageSize, onChange }: { page: num
   );
 }
 
-function LoadingDashboard() {
+function LoadingDashboard({ overview = false }: { overview?: boolean }) {
   return (
-    <div className="page-enter space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className={overview ? 'dashboard-overview space-y-6' : 'page-enter space-y-6'}>
+      {overview && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">Loading dashboard…</p>}
+      {overview && <div aria-hidden="true" className="card h-60 p-6"><div className="shimmer h-6 w-1/3 rounded-lg" /><div className="shimmer mt-4 h-12 w-2/3 rounded-lg" /></div>}
+      <div aria-hidden={overview || undefined} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="card h-28 overflow-hidden p-4">
             <div className="shimmer h-4 w-2/3 rounded-lg" />
@@ -2462,7 +2482,7 @@ function LoadingDashboard() {
           </div>
         ))}
       </div>
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div aria-hidden={overview || undefined} className={overview ? 'dashboard-tables' : 'grid gap-6 xl:grid-cols-2'}>
         <div className="card h-80 overflow-hidden p-5">
           <div className="shimmer h-5 w-1/3 rounded-lg" />
           <div className="shimmer mt-4 h-56 rounded-xl" />
