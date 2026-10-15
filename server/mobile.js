@@ -75,7 +75,9 @@ function invoiceView(invoice, principal) {
 }
 
 // Factory keeps HTTP handlers testable without initializing Firebase or loading credentials.
-export function createMobileRouter({ getAuth, store, cursorSecret = randomBytes(32), now = Date.now }) {
+export function createMobileRouter({ getAuth, store, production = null, cursorSecret, now = Date.now }) {
+  if (production && !cursorSecret) throw new Error('Stable production cursor signing key is required.');
+  cursorSecret ??= randomBytes(32);
   const router = Router();
   const sign = (value) => createHmac('sha256', cursorSecret).update(value).digest('base64url');
   const encode = (principal, after) => {
@@ -117,7 +119,7 @@ export function createMobileRouter({ getAuth, store, cursorSecret = randomBytes(
       if (!identifier(token.uid)) return error(res, 401, 'invalid_session', 'Your session is invalid.');
       const membership = await store.getMembership(token.uid);
       if (!membership || !ROLES.has(membership.role) || membership.status !== 'active' ||
-          !identifier(membership.municipalScopeId) || token.municipalRole !== membership.role ||
+          !identifier(membership.municipalScopeId) || (production && membership.municipalScopeId !== production.municipalScopeId) || token.municipalRole !== membership.role ||
           token.municipalScopeId !== membership.municipalScopeId ||
           (membership.role !== 'vendor' && membership.vendorBusinessId != null)) {
         return error(res, 403, 'access_denied', 'Your account has no approved mobile access.');

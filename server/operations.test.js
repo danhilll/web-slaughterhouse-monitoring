@@ -16,7 +16,7 @@ test('feature flag cannot enable the new workflows on a live project or remote e
   assert.equal(syntheticOperationsEnabled({...env,FIREBASE_AUTH_EMULATOR_HOST:undefined},'demo-test'),false);
   assert.equal(syntheticOperationsEnabled({...env,ANIMAL_OPERATIONS_ENABLED:'false'},'demo-test'),false);
 });
-async function fixture(t,enabled=true,now=()=>new Date().toISOString()) {
+async function fixture(t,enabled=true,now=()=>new Date().toISOString(),production=null) {
   const rows=new Map();let sequence=0,queue=Promise.resolve();
   const snap=ref=>({exists:rows.has(ref.path),id:ref.path.split('/').at(-1),data:()=>structuredClone(rows.get(ref.path))});
   const doc=path=>({path,get:async()=>snap({path})});
@@ -29,7 +29,7 @@ async function fixture(t,enabled=true,now=()=>new Date().toISOString()) {
   const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
   const animalStore={membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
   const store=createOperationsStore(()=>db),app=express();
-  app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,getPrincipal:req=>req.animalUser}));
+  app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:req=>req.animalUser}));
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const call=async(path,who='billing',body)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/operations${path}`,{method:body?'POST':'GET',headers:{...(who?{Authorization:`Bearer ${who}`} : {}),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
   return {rows,memberships,call};
@@ -221,4 +221,18 @@ test('workflow pagination is bounded and cursors reject other accounts, endpoint
   assert.equal((await call(`/eligible?cursor=${encodeURIComponent(first.body.nextCursor)}`)).status,400);
   assert.equal((await call(`/invoices?cursor=${encodeURIComponent(first.body.nextCursor+'x')}`)).status,400);
   assert.equal((await call('/invoices?vendor_id=VEN-B')).status,400);
+});
+
+test('production rollback preserves invoice and tracking reads with all mutations closed',async t=>{
+  const source=await fixture(t);const id=await inTransit(source);
+  const production={municipalScopeId:'SCOPE',features:{billing:false,payment:false,delivery:false,tracking:false}};
+  const f=await fixture(t,false,undefined,production);f.rows.set(`invoices/${id}`,source.rows.get(`invoices/${id}`));
+  const settings=(await f.call('/settings')).body;
+  assert.equal(settings.enabled,true);assert.equal(settings.canBill,false);assert.equal(settings.canDeliver,false);assert.equal(settings.canRecordPayment,false);assert.equal(settings.canPublishTracking,false);assert.equal(settings.feeSchedule,null);
+  assert.equal((await f.call(`/invoices/${id}`,'alice')).status,200);
+  assert.equal((await f.call(`/invoices/${id}`,'bob')).status,404);
+  assert.equal((await f.call('/invoices','other')).status,403);
+  assert.equal((await f.call(`/invoices/${id}/tracking`,'alice')).status,200);
+  for(const [path,who] of [['/animals/ANM-B/invoice','billing'],[`/invoices/${id}/payment`,'billing'],[`/invoices/${id}/delivery`,'delivery'],[`/invoices/${id}/delivery/status`,'delivery'],[`/invoices/${id}/tracking`,'delivery'],[`/invoices/${id}/delivery/location`,'delivery']])assert.equal((await f.call(path,who,{})).status,503);
+  f.memberships.delivery.status='inactive';assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery')).status,403);
 });

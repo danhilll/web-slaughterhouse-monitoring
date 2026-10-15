@@ -155,18 +155,23 @@ export function createFirebaseInvitationSender({ apiKey, emulatorHost, fetchImpl
 
 // Must be mounted after web administrator authentication, before the separately
 // paused business-write routes. No role/admin assignment is accepted from clients.
-export function createAccountsRouter({ getAuth, store, enabled = false, activationEnabled = false, scope = '', municipalityName = '', adminUids = new Set(), sendInvitation, now = () => new Date().toISOString() }) {
+export function createAccountsRouter({ getAuth, store, enabled = false, activationEnabled = false, production = null, scope = '', municipalityName = '', adminUids = new Set(), sendInvitation, now = () => new Date().toISOString() }) {
   const router = Router();
+  if (production && scope !== production.municipalScopeId) throw new Error('Production account scope must match the manifest.');
+  if (production) { enabled = production.features.accountManagement; activationEnabled = production.features.activation; }
+  const readEnabled = production ? true : enabled;
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
     if (!req.webUser || !adminUids.has(req.webUser.uid)) return res.status(403).json({ message: 'Web administrator access is required.' });
     next();
   });
-  router.get('/settings', (req, res) => res.json({ enabled: enabled && id(scope), municipalScopeId: id(scope) ? scope : null, municipalityName, roles: [...roles], staffInspectorAvailable: enabled && id(scope) && activationEnabled }));
+  router.get('/settings', (req, res) => res.json({ enabled: readEnabled && id(scope), canManageAccounts: enabled && id(scope), canDeactivate: readEnabled && id(scope), municipalScopeId: id(scope) ? scope : null, municipalityName, roles: [...roles], staffInspectorAvailable: readEnabled && id(scope) && activationEnabled }));
   router.use((req, res, next) => {
-    if (!enabled || !id(scope)) return res.status(503).json({ message: 'Account management is awaiting approved municipal setup.' });
+    if (!readEnabled || !id(scope)) return res.status(503).json({ message: 'Account management is awaiting approved municipal setup.' });
     next();
   });
+  const writeGate=feature=>(req,res,next)=>production&&production.features[feature]!==true
+    ?res.status(503).json({message:'This production account capability is paused.'}):next();
   router.use((req, res, next) => {
     if (!['GET', 'HEAD', 'POST'].includes(req.method)) return res.status(405).json({ message: 'Unsupported account operation.' });
     next();
@@ -214,7 +219,7 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     const items = rows.slice(0, 25);
     res.json({ items, nextCursor: rows.length > 25 ? items.at(-1).id : null });
   }));
-  router.post('/vendors', run(async (req, res) => {
+  router.post('/vendors', writeGate('accountManagement'), run(async (req, res) => {
     const b = req.body || {};
     const fields = ['name', 'address', 'contact_number', 'email', 'animal_type', 'marketName', 'marketSection', 'stallNumber'];
     if (Object.keys(b).some(k => !fields.includes(k)) || !text(b.name, 120) || !text(b.address, 300) ||
@@ -232,7 +237,7 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     await store.createVendor(vendor, req.webUser.uid);
     res.status(201).json({ vendor, message: 'Vendor business registered. Its ID remains the same if stall assignments change later.' });
   }));
-  router.post('/', run(async (req, res) => {
+  router.post('/', writeGate('accountManagement'), run(async (req, res) => {
     const body = req.body || {};
     if (Object.keys(body).some(k => !['fullName', 'email', 'role', 'vendorBusinessId', 'contactNumber', 'staffPermissions'].includes(k))) throw fail(400, 'Unsupported account field.');
     const permissions = body.staffPermissions ?? [];
@@ -277,12 +282,12 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     account.invitationStatus = await invite(account, req.webUser.uid);
     res.status(201).json({ account: view(account), message: account.invitationStatus === 'sent' ? 'Account created. Firebase accepted the password setup email request; inbox delivery is not guaranteed.' : 'Account created, but the invitation failed. Retry from Users after one minute.' });
   }));
-  router.post('/:uid/invitation', run(async (req, res) => {
+  router.post('/:uid/invitation', writeGate('accountManagement'), run(async (req, res) => {
     if (Object.keys(req.body || {}).length) throw fail(400, 'Invitation requests do not accept account changes.');
     const a = await owned(req.params.uid);
     res.json({ invitationStatus: await invite(a, req.webUser.uid) });
   }));
-  router.post('/:uid/activate', run(async (req, res) => {
+  router.post('/:uid/activate', writeGate('activation'), run(async (req, res) => {
     if (!activationEnabled) throw fail(503, 'Staff activation is awaiting approved municipal setup.');
     if (Object.keys(req.body || {}).length) throw fail(400, 'Activation requests do not accept account changes.');
     const a = await owned(req.params.uid);
@@ -295,7 +300,7 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     });
     res.json({ success: true, message: 'Mobile access activated with the existing role and assigned functions.' });
   }));
-  router.post('/:uid/permissions', run(async (req, res) => {
+  router.post('/:uid/permissions', writeGate('accountManagement'), run(async (req, res) => {
     const b = req.body || {}, permissions = b.staffPermissions;
     if (Object.keys(b).some(k => k !== 'staffPermissions') || !Array.isArray(permissions) || permissions.length > 3 || new Set(permissions).size !== permissions.length || permissions.some(p => !STAFF_PERMISSIONS.includes(p))) throw fail(400, 'Choose supported staff functions.');
     const a = await owned(req.params.uid);

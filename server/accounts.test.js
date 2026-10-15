@@ -52,7 +52,7 @@ async function fixture(t, options = {}) {
   })).activate;
   const app = express();
   app.use('/api', createWebAdminMiddleware(() => auth, new Set(['ADMIN'])));
-  app.use('/api/accounts', express.json(), createAccountsRouter({ getAuth: () => auth, store, enabled: options.enabled ?? true, ...(options.activationEnabled === null ? {} : {activationEnabled:options.activationEnabled ?? true}), scope:'SCOPE-A', adminUids:new Set(['ADMIN']), now: () => new Date(state.time).toISOString(), sendInvitation: async () => {state.mail++; if(state.mailFail) throw Error('mail');} }));
+  app.use('/api/accounts', express.json(), createAccountsRouter({ getAuth: () => auth, store, production: options.production, enabled: options.enabled ?? true, ...(options.activationEnabled === null ? {} : {activationEnabled:options.activationEnabled ?? true}), scope:'SCOPE-A', adminUids:new Set(['ADMIN']), now: () => new Date(state.time).toISOString(), sendInvitation: async () => {state.mail++; if(state.mailFail) throw Error('mail');} }));
   app.use('/api',createWriteGuard(false));
   app.post('/api/invoices',(req,res)=>res.json({unsafe:true}));
   const server=app.listen(0,'127.0.0.1'); await new Promise(r=>server.once('listening',r));
@@ -223,4 +223,28 @@ test('activation rechecks transactional state after the initial directory read',
   assert.equal((await call(`/${uid}/activate`,'POST',{})).status,409);
   assert.equal(state.memberships.get(uid).status,'inactive');assert.equal(state.accounts.get(uid).status,'pending');
   assert.equal(state.events.some(e=>e[0]==='activated'),false);
+});
+
+test('production rollback preserves scoped reads and emergency deactivation while other writes stay closed',async t=>{
+  const production={municipalScopeId:'SCOPE-A',features:{accountManagement:false,activation:false}};
+  const {call,state}=await fixture(t,{production});
+  const account={uid:'TARGET',fullName:'Synthetic',email:'target@example.test',role:'staff',municipalScopeId:'SCOPE-A',status:'active',staffPermissions:['inventory']};
+  state.accounts.set(account.uid,{...account});state.users.set(account.uid,{});state.memberships.set(account.uid,{...account});state.profiles.set(account.uid,{...account});
+  const settings=(await call('/settings')).body;
+  assert.equal(settings.enabled,true);assert.equal(settings.canManageAccounts,false);assert.equal(settings.canDeactivate,true);assert.equal(settings.staffInspectorAvailable,false);
+  assert.equal((await call()).body.items.length,1);assert.equal((await call('/TARGET/audit')).status,200);
+  for(const path of ['', '/vendors','/TARGET/invitation','/TARGET/permissions','/TARGET/activate'])assert.equal((await call(path,'POST',{})).status,503);
+  assert.equal((await call('/TARGET/deactivate','POST',{},'VENDOR')).status,403);
+  state.accounts.set('OTHER',{...account,uid:'OTHER',municipalScopeId:'SCOPE-B'});
+  assert.equal((await call('/OTHER/deactivate','POST',{})).status,404);
+  assert.equal((await call('/TARGET/deactivate','POST',{})).status,200);
+  assert.equal(state.memberships.get('TARGET').status,'inactive');assert.equal(state.users.get('TARGET').disabled,true);
+  assert.equal((await call('/TARGET/DEACTIVATE/','POST',{})).status,200);
+});
+test('production activation capability is independent of account onboarding',async t=>{
+  const {call}=await fixture(t,{production:{municipalScopeId:'SCOPE-A',features:{accountManagement:false,activation:true}}});
+  assert.equal((await call('/settings')).body.staffInspectorAvailable,true);
+  assert.equal((await call('/missing/activate','POST',{})).status,404);
+  assert.equal((await call('/missing/ACTIVATE/','POST',{})).status,404);
+  assert.equal((await call('','POST',form)).status,503);
 });

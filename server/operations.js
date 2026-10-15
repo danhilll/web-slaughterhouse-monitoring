@@ -121,10 +121,12 @@ export function createOperationsStore(getDb) {
   };
 }
 
-export function createOperationsRouter({store,animalStore,enabled=false,getPrincipal,cursorSecret=randomBytes(32),now=()=>new Date().toISOString()}) {
+export function createOperationsRouter({store,animalStore,enabled=false,getPrincipal,production=null,cursorSecret,now=()=>new Date().toISOString()}) {
+  if (production && !cursorSecret) throw new Error('Stable production cursor signing key is required.');
+  cursorSecret ??= randomBytes(32);
   const router=Router();
-  router.use((req,res,next)=>{res.set('Cache-Control','no-store');const p=getPrincipal(req);if(!p||!id(p.uid)||!id(p.municipalScopeId))return res.status(403).json({message:'Authorized municipal access is required.'});req.principal=p;next();});
-  router.use((req,res,next)=>{req.operationsEnabled=typeof enabled==='function'?enabled():enabled;next();});
+  router.use((req,res,next)=>{res.set('Cache-Control','no-store');const p=getPrincipal(req);if(!p||!id(p.uid)||!id(p.municipalScopeId)||(production&&p.municipalScopeId!==production.municipalScopeId))return res.status(403).json({message:'Authorized municipal access is required.'});req.principal=p;next();});
+  router.use((req,res,next)=>{req.operationsEnabled=production?true:typeof enabled==='function'?enabled():enabled;next();});
   router.use((req,res,next)=>req.method!=='GET'&&Object.keys(req.query).length?res.status(400).json({message:'Unsupported workflow filter.'}):next());
   const run=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){if(e.retryAfter)res.set('Retry-After',String(e.retryAfter));res.status(e.status||503).json({message:e.status?e.message:'Workflow unavailable. Refresh before retrying.'});}};
   router.get('/settings',run(async(req,res)=>{
@@ -132,10 +134,12 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     const p=req.principal,canBill=permission(p,'billing'),canDeliver=permission(p,'delivery');
     if(!canBill&&!canDeliver&&p.role!=='vendor')throw fail(403,'Billing or delivery permission is required.');
     let feeSchedule=null,feeMessage=null;
-    if(enabled&&canBill)try{feeSchedule=await store.schedule(p.municipalScopeId);}catch(e){if(e.status!==503)throw e;feeMessage='An approved fee schedule is required.';}
-    res.json({enabled,canBill,canDeliver,feeSchedule,feeMessage});
+    if(enabled&&canBill&&(!production||production.features.billing))try{feeSchedule=await store.schedule(p.municipalScopeId);}catch(e){if(e.status!==503)throw e;feeMessage='An approved fee schedule is required.';}
+    res.json({enabled,canBill:enabled&&canBill&&(!production||production.features.billing),canDeliver:enabled&&canDeliver&&(!production||production.features.delivery),canRecordPayment:enabled&&canBill&&(!production||production.features.payment),canPublishTracking:enabled&&canDeliver&&p.role==='staff'&&(!production||production.features.tracking),feeSchedule,feeMessage});
   }));
   router.use((req,res,next)=>req.operationsEnabled?next():res.status(503).json({message:'Billing, payment and delivery workflows are awaiting pilot activation.'}));
+  const writeGate=feature=>(req,res,next)=>production&&production.features[feature]!==true
+    ?res.status(503).json({message:'This production workflow is paused.'}):next();
   const sign=value=>createHmac('sha256',cursorSecret).update(value).digest('base64url');
   const binding=(p,kind)=>JSON.stringify([p.uid,p.role,p.municipalScopeId,p.vendorBusinessId||'',kind]);
   const encode=(p,after,kind)=>{const data=Buffer.from(JSON.stringify({binding:binding(p,kind),after,expires:Date.now()+3600000})).toString('base64url');return `${data}.${sign(data)}`;};
@@ -159,7 +163,7 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     const p=req.principal;if(!(p.role==='admin'||p.role==='vendor'||p.role==='staff'&&permission(p,'delivery')))throw fail(403,'Delivery tracking access is required.');
     res.json(await store.trackingRead(req.params.id,p,now()));
   }));
-  router.post('/invoices/:id/tracking',trackingLimit,run(async(req,res)=>{
+  router.post('/invoices/:id/tracking',writeGate('tracking'),trackingLimit,run(async(req,res)=>{
     const p=req.principal;if(p.role!=='staff'||!permission(p,'delivery'))throw fail(403,'Assigned delivery permission is required.');
     const b=req.body;if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['latitude','longitude','accuracyMeters','capturedAt'].includes(k)))throw fail(400,'Provide only location fields.');
     const result=await store.trackingPublish(req.params.id,b,p,now());res.json({...result.view,duplicate:result.duplicate});
@@ -182,30 +186,30 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     if(Object.keys(req.query).length)throw fail(400,'Unsupported workflow filter.');if(!canRead(req.principal))throw fail(403,'Billing or delivery permission is required.');
     const row=await store.get(req.params.id);if(!scopeRead(row,req.principal))throw fail(404,'Invoice not found.');if(!validInvoice(row))throw fail(503,'Invoice requires municipal review.');res.json(operationInvoiceView(row));
   }));
-  router.post('/animals/:id/invoice',run(async(req,res)=>{
+  router.post('/animals/:id/invoice',writeGate('billing'),run(async(req,res)=>{
     if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');
     const b=body(req,['expectedRevision','feeScheduleVersion','dueDate']);
     const at=now();
     if(!Number.isSafeInteger(b.feeScheduleVersion)||b.feeScheduleVersion<1||!day(b.dueDate)||b.dueDate<municipalDate(at))throw fail(400,'Use the displayed fee schedule and a valid due date.');
     res.status(201).json(operationInvoiceView(await store.bill(req.params.id,b,req.principal,at)));
   }));
-  router.post('/invoices/:id/payment',run(async(req,res)=>{
+  router.post('/invoices/:id/payment',writeGate('payment'),run(async(req,res)=>{
     if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');
     const b=body(req,['expectedRevision','amountCents','receiptReference','method']);
     if(!money(b.amountCents)||b.amountCents<=0||!text(b.receiptReference,80)||!['cash','bank_transfer'].includes(b.method))throw fail(400,'Enter the full payment, receipt reference and supported payment method.');
     res.json(operationInvoiceView(await store.mutate(req.params.id,b,req.principal,'payment_recorded',now())));
   }));
-  router.post('/invoices/:id/delivery',run(async(req,res)=>{
+  router.post('/invoices/:id/delivery',writeGate('delivery'),run(async(req,res)=>{
     if(!permission(req.principal,'delivery'))throw fail(403,'Delivery permission is required.');
     const b=body(req,['expectedRevision','assigneeUid','destination']);if(!id(b.assigneeUid)||!text(b.destination,200))throw fail(400,'Enter delivery staff and destination.');
     res.json(operationInvoiceView(await store.mutate(req.params.id,b,req.principal,'delivery_assigned',now())));
   }));
-  router.post('/invoices/:id/delivery/status',run(async(req,res)=>{
+  router.post('/invoices/:id/delivery/status',writeGate('delivery'),run(async(req,res)=>{
     if(!permission(req.principal,'delivery'))throw fail(403,'Delivery permission is required.');
     const b=body(req,['expectedRevision','status','notes']);if(!['in_transit','delivered'].includes(b.status)||!text(b.notes,500))throw fail(400,'Enter delivery status and confirmation notes.');
     res.json(operationInvoiceView(await store.mutate(req.params.id,b,req.principal,'delivery_status',now())));
   }));
-  router.post('/invoices/:id/delivery/location',trackingLimit,run(async(req,res)=>{
+  router.post('/invoices/:id/delivery/location',writeGate('tracking'),trackingLimit,run(async(req,res)=>{
     if(!permission(req.principal,'delivery'))throw fail(403,'Delivery permission is required.');
     const b=body(req,['expectedRevision','latitude','longitude','accuracyMeters','capturedAt']);
     const captured=Date.parse(b.capturedAt),at=now(),time=Date.parse(at);

@@ -15,7 +15,7 @@ test('startup wiring evaluates operations gates against the initialized project 
   };
   const principal = { uid: 'synthetic-admin', role: 'admin', municipalScopeId: 'ph-quezon-calauag', staffPermissions: [] };
   const context = {
-    app, express, process: { env }, firestoreDb: null, firebaseAuth: null, WEB_ADMIN_UIDS: new Set(),
+    app, express, routerConfig: () => ({}), process: { env }, firestoreDb: null, firebaseAuth: null, WEB_ADMIN_UIDS: new Set(),
     createAnimalStore: () => ({}),
     createOperationsStore: () => ({ schedule: async () => null, list: async () => [] }),
     createAnimalMobileAuth: () => (req, res, next) => { req.animalUser = principal; next(); },

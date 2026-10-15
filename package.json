@@ -14,7 +14,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "check:server": "node --check server/index.js && node --check server/hosting.js && node --check server/access.js && node --check server/mobile.js && node --check scripts/seed-firestore.js && node --check scripts/check-firebase-connection.js && node --check scripts/inspect-firestore-shape.js && node --check scripts/publish-firestore-lockdown.js && node --check scripts/check-firestore-lockdown.js",
+    "check:server": "node --check server/index.js && node --check server/hosting.js && node --check server/access.js && node --check server/production-config.js && node --check server/scoped-reads.js && node --check server/accounts.js && node --check server/animals.js && node --check server/operations.js && node --check server/mobile.js && node --check scripts/seed-firestore.js && node --check scripts/check-firebase-connection.js && node --check scripts/inspect-firestore-shape.js && node --check scripts/publish-firestore-lockdown.js && node --check scripts/check-firestore-lockdown.js",
     "check:firebase": "node scripts/check-firebase-connection.js",
     "inspect:firestore": "node scripts/inspect-firestore-shape.js",
     "test:server": "node --test server/*.test.js",

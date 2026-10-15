@@ -65,6 +65,7 @@ export type FeeConfig = {
 };
 
 export type DashboardData = {
+  recordBasis?: string;
   summary: {
     totalVendors: number;
     totalRecordsToday: number;

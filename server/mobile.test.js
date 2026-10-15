@@ -13,7 +13,7 @@ const invoice = (id, business = 'VEN-A', scope = 'SCOPE-A', status = 'Unpaid') =
   delivery_fee: 25, anti_mortem_fee: 10, facility_fee: 45, total_amount: 95,
   payment_status: status, notes: 'Synthetic only', internal_secret: 'must not be exposed' });
 
-async function fixture(t, change = () => {}) {
+async function fixture(t, change = () => {}, production = null) {
   const state = {
     tokens: { alice: { uid: 'UID-A', municipalRole: 'vendor', municipalScopeId: 'SCOPE-A' },
       bob: { uid: 'UID-B', municipalRole: 'vendor', municipalScopeId: 'SCOPE-A' },
@@ -56,7 +56,7 @@ async function fixture(t, change = () => {}) {
     }
   };
   const app = express();
-  app.use('/api/mobile', createMobileRouter({ getAuth: () => auth, store,
+  app.use('/api/mobile', createMobileRouter({ production, getAuth: () => auth, store,
     cursorSecret: Buffer.alloc(32, 1), now: () => state.now }));
   app.use('/api', createWebAdminMiddleware(() => auth, new Set(['UID-ADMIN'])));
   app.use('/api', createWriteGuard(false));
@@ -226,4 +226,10 @@ test('Firestore adapter issues a bounded scope/business query with document-ID c
   assert.deepEqual(calls.slice(0, 3), [['collection', 'invoices'], ['where', 'municipalScopeId', '==', 'SCOPE-A'],
     ['where', 'vendor_id', '==', 'VEN-A']]);
   assert.deepEqual(calls.slice(-2), [['startAfter', 'INV-1'], ['limit', 21]]);
+});
+
+test('production mobile reads reject otherwise valid membership in a different municipality',async t=>{
+  const {request}=await fixture(t,()=>{},{municipalScopeId:'SCOPE-A'});
+  assert.equal((await request('/api/mobile/me','alice')).status,200);
+  assert.equal((await request('/api/mobile/me','carol')).status,403);
 });

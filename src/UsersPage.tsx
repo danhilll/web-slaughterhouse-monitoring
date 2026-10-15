@@ -4,7 +4,7 @@ import { Mail, ShieldCheck, UserPlus, Search } from 'lucide-react';
 import { VendorRegistrationForm, type RegisteredBusiness } from './VendorRegistrationForm';
 
 type Account = { uid: string; fullName: string; email: string; role: string; status: string; invitationStatus: string; vendorBusinessId?: string; staffPermissions?: string[] };
-type Settings = { enabled: boolean; municipalScopeId: string | null; municipalityName: string; staffInspectorAvailable: boolean };
+type Settings = { enabled: boolean; canManageAccounts: boolean; canDeactivate: boolean; municipalScopeId: string | null; municipalityName: string; staffInspectorAvailable: boolean };
 type Audit = { action: string; actorUid: string; at: string };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(`/api/accounts${path}`, init);
@@ -103,6 +103,7 @@ export function UsersPage() {
       {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-4 text-emerald-800">{notice}</p>}
     </section>
     {settings?.enabled && <>
+      {settings.canManageAccounts && <>
       <VendorRegistrationForm onRegistered={vendor => { setBusinesses(old => [...old.filter(b => b.id !== vendor.id), vendor]); setForm(old => ({ ...old, role: 'vendor', vendorBusinessId: vendor.id })); }} />
       <form className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900" onSubmit={e => { e.preventDefault(); void action(async () => {
         const payload = { fullName: form.fullName, email: form.email, contactNumber: form.contactNumber, role: form.role, ...(form.role === 'vendor' ? { vendorBusinessId: form.vendorBusinessId } : {}), ...(form.role === 'staff' ? { staffPermissions: form.staffPermissions } : {}) };
@@ -121,6 +122,7 @@ export function UsersPage() {
         </div>
         <button className="btn-primary mt-5" disabled={busy} type="submit">{busy ? 'Working...' : 'Create account and send invitation'}</button>
       </form>
+      </>}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
         <label className="mb-4 flex items-center gap-2"><Search size={18} /><span className="sr-only">Search loaded users</span><input className="input w-full" placeholder="Search loaded users by name, email or role" value={query} onChange={e => setQuery(e.target.value)} /></label>
         <p className="mb-4 text-xs text-slate-500">{items.length} users loaded{cursor ? '. More users are available below.' : '.'} Search applies to loaded users.</p>
@@ -133,11 +135,11 @@ export function UsersPage() {
                   finally { await load(); }
                 });
               }}>Activate mobile access</button>}
-              <button className="btn-secondary" disabled={busy || !['active', 'pending'].includes(a.status)} onClick={() => void action(async () => { const r = await request<{ invitationStatus: string }>(`/${encodeURIComponent(a.uid)}/invitation`, { ...post, body: '{}' }); if (alive.current) setNotice(r.invitationStatus === 'sent' ? 'Firebase accepted the setup email request. Ask the user to check their inbox and spam.' : 'Invitation failed. Retry after one minute.'); await load(); })}><Mail size={14} />Resend invitation</button>
+              <button className="btn-secondary" disabled={busy || !settings.canManageAccounts || !['active', 'pending'].includes(a.status)} onClick={() => void action(async () => { const r = await request<{ invitationStatus: string }>(`/${encodeURIComponent(a.uid)}/invitation`, { ...post, body: '{}' }); if (alive.current) setNotice(r.invitationStatus === 'sent' ? 'Firebase accepted the setup email request. Ask the user to check their inbox and spam.' : 'Invitation failed. Retry after one minute.'); await load(); })}><Mail size={14} />Resend invitation</button>
               <button className="btn-secondary" disabled={busy} onClick={() => void action(async () => { const r = await request<{ items: Audit[] }>(`/${encodeURIComponent(a.uid)}/audit`); if (alive.current) { setSelected(a); setHistory(r.items); } })}>History</button>
-              <button className="btn-danger" disabled={busy} onClick={() => { if (window.confirm(`Deactivate mobile access for ${a.fullName}?`)) void action(async () => { try { await request(`/${encodeURIComponent(a.uid)}/deactivate`, { ...post, body: '{}' }); if (alive.current) setNotice('Mobile access deactivated.'); } finally { await load(); } }); }}>{a.status === 'inactive' ? 'Retry session cleanup' : 'Deactivate'}</button>
+              <button className="btn-danger" disabled={busy || !settings.canDeactivate} onClick={() => { if (window.confirm(`Deactivate mobile access for ${a.fullName}?`)) void action(async () => { try { await request(`/${encodeURIComponent(a.uid)}/deactivate`, { ...post, body: '{}' }); if (alive.current) setNotice('Mobile access deactivated.'); } finally { await load(); } }); }}>{a.status === 'inactive' ? 'Retry session cleanup' : 'Deactivate'}</button>
             </div></div>
-          {a.role === 'staff' && <StaffPermissionEditor account={a} onSaved={() => load()} />}
+          {settings.canManageAccounts && a.role === 'staff' && <StaffPermissionEditor account={a} onSaved={() => load()} />}
         </article>)}</div>
         {!visible.length && <p className="py-6 text-sm text-slate-500">{items.length ? 'No loaded users match your search.' : 'No managed mobile accounts yet. Historical Firebase accounts require a separate ownership review.'}</p>}
         {cursor && <button className="btn-secondary mt-4" disabled={busy} onClick={() => void action(() => load(cursor))}>Load more users</button>}

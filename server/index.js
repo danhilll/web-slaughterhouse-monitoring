@@ -1,4 +1,6 @@
 import express from 'express';
+import { createScopedReads } from './scoped-reads.js';
+import { loadProductionConfig, assertProductionProject } from './production-config.js';
 import cors from 'cors';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +15,8 @@ import { isValidHeadcount } from './headcounts.js';
 const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 
+const production = loadProductionConfig();
+const routerConfig = domain => production ? { production, cursorSecret: production.cursorSecret(domain) } : {};
 const app = express();
 const requestedPort = Number(process.argv[2] || process.env.PORT || 5000);
 const PORT = Number.isFinite(requestedPort) ? requestedPort : 5000;
@@ -44,12 +48,8 @@ const isNonNegativeNumber = (value) => {
   return Number.isFinite(num) && num >= 0;
 };
 
-// Pagination decision (B16): frontend paginates client-side (pageSize 10),
-// which is fine at demo scale, so full cursor paging is deferred until a
-// collection exceeds ~500 docs. Meanwhile every list endpoint accepts an
-// OPTIONAL ?limit=1..500 guardrail — omitted (all current callers) means
-// "all", so behavior is unchanged. This caps Firestore read fan-out
-// (cost) for future direct/mobile callers.
+// Legacy array views accept an optional presentation limit. Production reads
+// are separately scoped and bounded at the database; incomplete views fail closed.
 const MAX_LIST_LIMIT = 500;
 const applyLimit = (list, req, res) => {
   const raw = req.query.limit;
@@ -307,6 +307,7 @@ const initFirestore = async () => {
 const docData = (doc) => ({ id: doc.id, ...doc.data() });
 
 // --- Store: identical async interface for both backends --------------------
+const scopedReads = createScopedReads(() => firestoreDb, process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag');
 const store = {
   async getFees() {
     if (useFirestore) {
@@ -314,6 +315,7 @@ const store = {
       if (snap.exists && Array.isArray(snap.data().fees)) {
         return { fees: snap.data().fees, configured: true };
       }
+      if (production) return { fees: [], configured: false };
       return { fees: JSON.parse(JSON.stringify(seedFeeConfig)), configured: false };
     }
     return { fees: memory.feeConfig, configured: false };
@@ -333,6 +335,7 @@ const store = {
     return fees;
   },
   async listVendors() {
+    if (production) return scopedReads.list('vendors');
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.vendors).get();
       return snap.docs.map(docData);
@@ -340,6 +343,7 @@ const store = {
     return memory.vendors;
   },
   async getVendor(id) {
+    if (production) return scopedReads.get('vendors', id);
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.vendors).doc(id).get();
       return snap.exists ? docData(snap) : null;
@@ -368,6 +372,7 @@ const store = {
     return vendor;
   },
   async listRecords() {
+    if (production) return scopedReads.list('slaughter_records');
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.slaughterRecords).get();
       return snap.docs.map(docData);
@@ -375,6 +380,7 @@ const store = {
     return memory.slaughterRecords;
   },
   async getRecord(id) {
+    if (production) return scopedReads.get('slaughter_records', id);
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.slaughterRecords).doc(id).get();
       return snap.exists ? docData(snap) : null;
@@ -418,6 +424,7 @@ const store = {
     return true;
   },
   async listInvoices() {
+    if (production) return scopedReads.list('invoices');
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.invoices).get();
       return snap.docs.map(docData);
@@ -425,6 +432,7 @@ const store = {
     return memory.invoices;
   },
   async getInvoice(id) {
+    if (production) return scopedReads.get('invoices', id);
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.invoices).doc(id).get();
       return snap.exists ? docData(snap) : null;
@@ -468,6 +476,7 @@ const store = {
     return true;
   },
   async listNotifications() {
+    if (production) return scopedReads.list('notifications');
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.notifications).get();
       return snap.docs.map(docData);
@@ -475,6 +484,7 @@ const store = {
     return memory.notifications;
   },
   async getNotification(id) {
+    if (production) return scopedReads.get('notifications', id);
     if (useFirestore) {
       const snap = await firestoreDb.collection(COLLECTIONS.notifications).doc(id).get();
       return snap.exists ? docData(snap) : null;
@@ -586,6 +596,10 @@ const monthLabelForKey = (yearMonth) =>
   new Date(`${yearMonth}-01T00:00:00`).toLocaleString('en-US', { month: 'short' });
 
 const buildDashboard = async () => {
+  if (production) return scopedReads.dashboard({
+    today: manilaDateString(), month: manilaMonthKey(), municipality: MUNICIPALITY,
+    months: Array.from({length:6},(_,i)=>{const key=shiftMonthKey(manilaMonthKey(),i-5);return {key,next:shiftMonthKey(key,1),label:monthLabelForKey(key)};})
+  });
   const [vendorList, slaughterRecords, invoices, feeConfig] = await Promise.all([
     store.listVendors(),
     store.listRecords(),
@@ -682,28 +696,28 @@ const animalWorkflowEnabled = process.env.ANIMAL_WORKFLOW_ENABLED === 'true';
 const operationsEnabled = () => syntheticOperationsEnabled(process.env, firestoreDb?.projectId);
 const operationsStore = createOperationsStore(() => firestoreDb);
 app.use('/api/mobile/operations', express.json({ limit: '16kb' }), createAnimalMobileAuth(() => firebaseAuth, animalStore),
-  createOperationsRouter({ store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(), getPrincipal: req => req.animalUser }));
+  createOperationsRouter({ store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(), ...routerConfig('operations'), getPrincipal: req => req.animalUser }));
 const municipalScope = process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag';
 app.use('/api/mobile/animals', express.json({ limit: '16kb' }),
   createAnimalMobileAuth(() => firebaseAuth, animalStore),
-  createAnimalRouter({ store: animalStore, enabled: animalWorkflowEnabled, operationsEnabled, getPrincipal: req => req.animalUser }));
+  createAnimalRouter({ store: animalStore, enabled: animalWorkflowEnabled, ...routerConfig('animals'), operationsEnabled, getPrincipal: req => req.animalUser }));
 app.use('/api/mobile', createMobileRouter({
   getAuth: () => firebaseAuth,
-  store: createMobileFirestoreStore(() => firestoreDb)
+  store: createMobileFirestoreStore(() => firestoreDb), ...routerConfig('mobile')
 }));
 app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
 app.use('/api/operations', express.json({ limit: '16kb' }), createOperationsRouter({
-  store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(),
+  store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(), ...routerConfig('operations'),
   getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
 }));
 app.use('/api/animals', express.json({ limit: '16kb' }), createAnimalRouter({
-  store: animalStore, enabled: animalWorkflowEnabled,
+  store: animalStore, enabled: animalWorkflowEnabled, ...routerConfig('animals'),
   getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
 }));
 app.use('/api/accounts', express.json({ limit: '16kb' }), createAccountsRouter({
   getAuth: () => firebaseAuth,
   store: createAccountStore(() => firestoreDb),
-  adminUids: WEB_ADMIN_UIDS,
+  adminUids: WEB_ADMIN_UIDS, production,
   enabled: process.env.ACCOUNT_MANAGEMENT_ENABLED === 'true',
   scope: process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag',
   municipalityName: 'Municipality of Calauag, Quezon, Philippines',
@@ -716,7 +730,7 @@ app.use('/api', createWriteGuard(WEB_WRITES_ENABLED));
 app.use('/api', express.json({ limit: '64kb' }));
 
 app.get('/api/session', (req, res) => {
-  res.json({ ...req.webUser, writesEnabled: WEB_WRITES_ENABLED });
+  res.json({ ...req.webUser, writesEnabled: WEB_WRITES_ENABLED, ...(production ? { capabilities: production.features } : {}) });
 });
 
 app.get('/api/dashboard', asyncHandler(async (req, res) => {
@@ -1146,6 +1160,7 @@ app.use((err, req, res, next) => {
   console.error('[api] Unhandled error:', err?.message || err);
   if (res.headersSent) return next(err);
   if (err?.status === 413) return res.status(413).json({ message: 'Request body is too large.' });
+  if (err?.status === 503) return res.status(503).json({ message: err.publicMessage === true ? err.message : 'API read is unavailable.' });
   if (err?.status === 400) return res.status(400).json({ message: 'Invalid request body.' });
   res.status(500).json({ message: 'Internal server error.' });
 });
@@ -1157,6 +1172,7 @@ const start = async () => {
   }
   useFirestore = await initFirestore();
   if (!useFirestore) throw new Error('Firestore is required. Set FIREBASE_PROJECT_ID and valid Admin SDK credentials.');
+  assertProductionProject(production, firestoreDb.projectId);
   console.log(
     'Municipal slaughterhouse API is running on http://localhost:' + PORT + ' [Firestore: ' + process.env.FIREBASE_PROJECT_ID + ']'
   );

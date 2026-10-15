@@ -5,7 +5,7 @@ import { createAnimalRouter,createAnimalMobileAuth,createAnimalStore,animalBilli
 import { createWebAdminMiddleware,createWriteGuard } from './access.js';
 
 const input={identifier:'TAG-001',identifierType:'manual',vendorBusinessId:'VEN-A',species:'Pig',weightGrams:85000,weighedAt:'2020-01-01T08:00:00.000Z'};
-async function fixture(t,enabled=true){
+async function fixture(t,enabled=true,production=null){
   const state={animals:new Map(),events:[],memberships:{inventory:{role:'staff',staffPermissions:['inventory']},billing:{role:'staff',staffPermissions:['billing']},delivery:{role:'staff',staffPermissions:['delivery']},inspector:{role:'inspector'},alice:{role:'vendor',vendorBusinessId:'VEN-A'},bob:{role:'vendor',vendorBusinessId:'VEN-B'},other:{role:'inspector',municipalScopeId:'SCOPE-B'}}};
   for(const m of Object.values(state.memberships)){m.municipalScopeId??='SCOPE-A';m.status='active';}
   state.vendorRecords=new Map([['VEN-A',{id:'VEN-A',name:'Synthetic business A',municipalScopeId:'SCOPE-A',status:'Active',marketName:'Synthetic Market',marketSection:'Meat',stallNumber:'S-01',email:'private@example.test',contact_number:'private',address:'private',password:'private',authUid:'private'}],['VEN-B',{id:'VEN-B',name:'Synthetic business B',municipalScopeId:'SCOPE-A',status:'Active'}]]);
@@ -27,9 +27,9 @@ async function fixture(t,enabled=true){
   state.claimOverrides={};
   const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(state.verificationFailure)throw state.verificationFailure;if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:state.memberships[token]?.role,municipalScopeId:state.memberships[token]?.municipalScopeId,...state.claimOverrides[token]};}};
   const app=express();
-  app.use('/api/mobile/animals',express.json(),createAnimalMobileAuth(()=>auth,store),createAnimalRouter({store,enabled,getPrincipal:req=>req.animalUser,cursorSecret:Buffer.alloc(32,1)}));
+  app.use('/api/mobile/animals',express.json(),createAnimalMobileAuth(()=>auth,store),createAnimalRouter({store,enabled,production,getPrincipal:req=>req.animalUser,cursorSecret:Buffer.alloc(32,1)}));
   app.use('/api',createWebAdminMiddleware(()=>auth,new Set(['ADMIN'])));
-  app.use('/api/animals',express.json(),createAnimalRouter({store,enabled,getPrincipal:req=>({uid:req.webUser.uid,role:'admin',municipalScopeId:'SCOPE-A',staffPermissions:[]})}));
+  app.use('/api/animals',express.json(),createAnimalRouter({store,enabled,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:req=>({uid:req.webUser.uid,role:'admin',municipalScopeId:'SCOPE-A',staffPermissions:[]})}));
   app.use('/api',createWriteGuard(false));app.post('/api/invoices',(req,res)=>res.json({}));
   const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
   const call=async(path='',token='inventory',method='GET',body,web=false)=>{const response=await fetch(`http://127.0.0.1:${server.address().port}${path==='/invoices'?'/api/invoices':`/api/${web?'animals':'mobile/animals'}${path}`}`,{method,headers:{...(token?{Authorization:`Bearer ${token}`} : {}),'Content-Type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})});return {status:response.status,body:await response.json()};};
@@ -151,4 +151,36 @@ test('identity requires live active inspector membership and matching role/scope
   }
   state.claimOverrides.inspector={};state.memberships.inspector.status='inactive';assert.equal((await call(path,'inspector')).status,403);
   delete state.memberships.inspector;assert.equal((await call(path,'inspector')).status,403);
+});
+
+test('production rollback keeps animal reads scoped and closes every recording path',async t=>{
+  const source=await fixture(t);const created=await source.call('','inventory','POST',input);
+  const production={municipalScopeId:'SCOPE-A',features:{animals:false,inspection:false,carcass:false}};
+  const {call,state}=await fixture(t,true,production);state.animals.set(created.body.id,source.state.animals.get(created.body.id));
+  const settings=(await call('/settings')).body;
+  assert.equal(settings.enabled,true);assert.equal(settings.canRecord,false);assert.equal(settings.canInspect,false);assert.equal(settings.canRecordCarcassWeight,false);
+  assert.equal((await call(`/${created.body.id}`,'alice')).status,200);
+  assert.equal((await call(`/${created.body.id}`,'bob')).status,404);
+  assert.equal((await call('','other')).status,403);
+  assert.equal((await call('','billing')).status,403);
+  for(const path of ['',`/${created.body.id}/correction`,`/${created.body.id}/inspection`,`/${created.body.id}/carcass-weight`])assert.equal((await call(path,'inventory','POST',{})).status,503);
+  state.memberships.inventory.status='inactive';assert.equal((await call()).status,403);
+});
+test('production animal and inspection capabilities remain independent and role checked',async t=>{
+  const production={municipalScopeId:'SCOPE-A',features:{animals:true,inspection:false,carcass:false}};
+  const {call}=await fixture(t,false,production);
+  assert.equal((await call('','billing','POST',input)).status,403);
+  const created=await call('','inventory','POST',input);assert.equal(created.status,201);
+  assert.equal((await call(`/${created.body.id}/inspection`,'inspector','POST',{})).status,503);
+  assert.equal((await call('/settings','inspector')).body.canInspect,false);
+  assert.equal((await call(`/${created.body.id}/INSPECTION/`,'inspector','POST',{})).status,503);
+});
+test('stable production animal cursors survive another router instance and retain user binding',async t=>{
+  const source=await fixture(t);const created=await source.call('','inventory','POST',input);const original=source.state.animals.get(created.body.id);
+  const production={municipalScopeId:'SCOPE-A',features:{animals:false,inspection:false,carcass:false}};
+  const a=await fixture(t,false,production),b=await fixture(t,false,production);
+  for(let i=0;i<26;i++){const id=`ANM-${String(i).padStart(3,'0')}`;for(const f of [a,b])f.state.animals.set(id,{...original,id});}
+  const first=await a.call();assert.equal(first.body.items.length,25);assert.ok(first.body.nextCursor);
+  assert.equal((await b.call(`?cursor=${encodeURIComponent(first.body.nextCursor)}`)).body.items.length,1);
+  assert.equal((await b.call(`?cursor=${encodeURIComponent(first.body.nextCursor)}`,'alice')).status,400);
 });

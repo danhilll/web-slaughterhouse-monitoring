@@ -942,7 +942,7 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Monthly slaughter volume</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Headcount per month, last 6 months</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Headcount per month, last 6 months</p>{dashboard.recordBasis && <p className="mt-1 text-xs text-amber-700">{dashboard.recordBasis}</p>}
             </div>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
               <BarChart3 size={18} aria-hidden="true" />
