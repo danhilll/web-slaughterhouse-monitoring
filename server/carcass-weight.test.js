@@ -1,0 +1,144 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import {createAnimalStore,createAnimalRouter,createAnimalMobileAuth} from './animals.js';
+import {createWebAdminMiddleware} from './access.js';
+import {createOperationsStore} from './operations.js';
+
+const at='2026-10-15T06:00:00.000Z';
+const input={weightGrams:65001,weighedAt:at,expectedRevision:1,expectedCarcassRevision:0};
+async function fixture(t,{gate=true,enabled=true}={}) {
+  const rows=new Map();let sequence=0,queue=Promise.resolve();
+  const state={failAudit:false};
+  const snap=ref=>({exists:rows.has(ref.path),id:ref.path.split('/').at(-1),data:()=>structuredClone(rows.get(ref.path))});
+  const doc=path=>({path,get:async()=>snap({path})});
+  const db={doc,collection:path=>({doc:()=>doc(`${path}/EVENT-${++sequence}`),where(field,op,value){
+    const filters=[[field,value]];
+    const q={where:(f,o,v)=>{filters.push([f,v]);return q;},orderBy:()=>q,limit:n=>{q.count=n;return q;},get:async()=>({docs:[...rows].filter(([key,row])=>key.startsWith(path+'/')&&filters.every(([f,v])=>row[f]===v)).slice(0,q.count).map(([path])=>snap({path}))})};return q;
+  }}),runTransaction(fn){
+    const result=queue.then(async()=>{
+      const writes=[];
+      const tx={get:async ref=>{assert.equal(writes.length,0,'Firestore reads precede writes');return snap(ref);},
+        create:(ref,row)=>{if(state.failAudit&&ref.path.startsWith('animal_audit/'))throw Error('private audit failure');assert.equal(rows.has(ref.path),false);writes.push([ref.path,row]);},
+        set:(ref,row)=>writes.push([ref.path,row]),update:(ref,patch)=>writes.push([ref.path,{...rows.get(ref.path),...patch}])};
+      const value=await fn(tx);for(const [path,row] of writes)rows.set(path,structuredClone(row));return value;
+    });queue=result.catch(()=>{});return result;
+  }};
+  const members={inventory:{role:'staff',staffPermissions:['inventory']},billing:{role:'staff',staffPermissions:['billing']},delivery:{role:'staff',staffPermissions:['delivery']},inspector:{role:'inspector'},vendor:{role:'vendor',vendorBusinessId:'VEN-A'},other:{role:'staff',staffPermissions:['inventory'],municipalScopeId:'OTHER'}};
+  for(const [uid,m] of Object.entries(members))rows.set(`mobile_memberships/${uid}`,{...m,status:'active',municipalScopeId:m.municipalScopeId||'SCOPE'});
+  rows.set('vendors/VEN-A',{id:'VEN-A',name:'Synthetic business',municipalScopeId:'SCOPE',status:'Active'});
+  rows.set('animal_records/ANM-A',{id:'ANM-A',municipalScopeId:'SCOPE',vendorBusinessId:'VEN-A',identifier:'TEST-A',identifierType:'manual',species:'Pig',weightGrams:85001,weighedAt:'2026-10-15T05:00:00.000Z',revision:1,inspection:{status:'approved',revision:1,inspectorUid:'inspector',decidedAt:'2026-10-15T05:30:00.000Z',notes:'Verified'},createdAt:at,createdBy:'inventory',updatedAt:at,updatedBy:'inspector'});
+  rows.set('operation_fee_schedules/SCOPE',{status:'approved',version:1,basis:'perAnimal',currency:'PHP',corralCents:1500,deliveryCents:2500,inspectionCents:1000,facilityCents:4500,syntheticOnly:true});
+  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(token==='expired')throw {code:'auth/id-token-expired'};const m=rows.get(`mobile_memberships/${token}`);return {uid:token,municipalRole:m?.role,municipalScopeId:m?.municipalScopeId};}};
+  const store=createAnimalStore(()=>db),app=express();app.use(express.json());
+  const options={store,enabled,now:()=>at,...(gate===undefined?{}:{carcassWeightEnabled:gate})};
+  app.use('/api/mobile/animals',createAnimalMobileAuth(()=>auth,store),createAnimalRouter({...options,getPrincipal:req=>req.animalUser}));
+  app.use('/api',createWebAdminMiddleware(()=>auth,new Set(['ADMIN'])));
+  app.use('/api/animals',createAnimalRouter({...options,getPrincipal:req=>({uid:req.webUser.uid,role:'admin',municipalScopeId:'SCOPE',staffPermissions:[]})}));
+  app.use((error,req,res,next)=>res.status(error.status===400?400:500).json({message:'Invalid request body.'}));
+  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const call=async({body=input,who='inventory',suffix='/ANM-A/carcass-weight',method='POST',web=false}={})=>{
+    const response=await fetch(`http://127.0.0.1:${server.address().port}/api/${web?'animals':'mobile/animals'}${suffix}`,{method,headers:{...(who?{Authorization:`Bearer ${who}`} : {}),'Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify(body)}:{})});
+    return {status:response.status,body:await response.json()};
+  };
+  return {rows,state,call,store,billing:createOperationsStore(()=>db),animal:()=>rows.get('animal_records/ANM-A'),events:()=>[...rows].filter(([key])=>key.startsWith('animal_audit/')).map(([,row])=>row)};
+}
+
+test('carcass first entry and correction preserve live weight, animal revision and inspector evidence with atomic snapshots',async t=>{
+  const f=await fixture(t),original=structuredClone(f.animal());
+  const first=await f.call();assert.equal(first.status,200);
+  assert.deepEqual(first.body.carcassWeight,{weightGrams:65001,weighedAt:at,revision:1,animalRevision:1,recordedAt:at,recordedBy:'inventory'});
+  assert.deepEqual(f.animal(),{...original,carcassWeight:first.body.carcassWeight,updatedAt:at,updatedBy:'inventory'});
+  assert.equal(f.events()[0].before.carcassWeight,null);assert.deepEqual(f.events()[0].after.carcassWeight,first.body.carcassWeight);
+  const result=await f.call({who:'ADMIN',web:true,body:{...input,weightGrams:66002,expectedCarcassRevision:1,reason:' Corrected scale entry '}});
+  assert.equal(result.status,200);assert.equal(result.body.carcassWeight.revision,2);assert.equal(result.body.carcassWeight.recordedBy,'ADMIN');
+  assert.equal(f.events()[1].action,'carcass_weight_corrected');assert.equal(f.events()[1].reason,'Corrected scale entry');
+  assert.deepEqual(f.events()[1].before.carcassWeight,first.body.carcassWeight);assert.deepEqual(f.events()[1].after.carcassWeight,result.body.carcassWeight);
+  assert.deepEqual(result.body.inspection,original.inspection);assert.equal(result.body.revision,original.revision);assert.equal(result.body.weightGrams,original.weightGrams);assert.equal(result.body.weighedAt,original.weighedAt);
+});
+
+test('carcass recording gate defaults closed independently of animal activation',async t=>{
+  const f=await fixture(t,{gate:false});assert.equal((await f.call()).status,503);assert.equal(f.events().length,0);
+  const settings=(await f.call({suffix:'/settings',method:'GET'})).body;
+  assert.equal(settings.carcassWeightEnabled,false);assert.equal(settings.canRecordCarcassWeight,false);assert.equal(settings.carcassDefinitionStatus,'awaiting_confirmation');
+  const off=await fixture(t,{enabled:false});assert.equal((await off.call()).status,503);
+  // Omit the option entirely to exercise the default (rather than only explicit false).
+  const app=express();app.use(createAnimalRouter({store:{},enabled:true,getPrincipal:()=>({uid:'ADMIN',role:'admin',municipalScopeId:'SCOPE'})}));
+  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
+  const response=await fetch(`http://127.0.0.1:${server.address().port}/ANM-A/carcass-weight`,{method:'POST'});assert.equal(response.status,503);
+});
+
+test('carcass authorization denies other roles, scopes, disabled memberships and invalid sessions',async t=>{
+  const f=await fixture(t);
+  for(const who of ['billing','delivery','inspector','vendor'])assert.equal((await f.call({who})).status,403);
+  assert.equal((await f.call({who:'other'})).status,404);
+  for(const who of [null,'expired'])assert.equal((await f.call({who})).status,401);
+  f.rows.get('mobile_memberships/inventory').staffPermissions=[];assert.equal((await f.call()).status,403);
+  f.rows.get('mobile_memberships/inventory').status='inactive';assert.equal((await f.call()).status,403);
+  assert.equal(f.events().length,0);assert.equal(f.animal().carcassWeight,undefined);
+});
+
+test('carcass validation rejects fractional grams, unsafe values, extra fields, invalid times and revisions',async t=>{
+  const f=await fixture(t);
+  for(const patch of [{weightGrams:0},{weightGrams:-1},{weightGrams:1.1},{weightGrams:'65000'},{weightGrams:Number.MAX_SAFE_INTEGER+1},{weighedAt:'invalid'},{weighedAt:'2026-10-15T06:00:00'},{weighedAt:'2026-10-15T06:01:00.001Z'},{expectedRevision:0},{expectedRevision:1.5},{expectedCarcassRevision:-1},{expectedCarcassRevision:'0'},{municipalScopeId:'OTHER'},{weightKg:65},{reason:''},{reason:'x'.repeat(501)},{reason:'bad\nreason'}])
+    assert.equal((await f.call({body:{...input,...patch}})).status,400,JSON.stringify(patch));
+  for(const key of Object.keys(input)){const body={...input};delete body[key];assert.equal((await f.call({body})).status,400,key);}
+  for(const body of [[],null])assert.equal((await f.call({body})).status,400);
+  assert.equal((await f.call({suffix:'/ANM-A/carcass-weight?scope=OTHER'})).status,400);
+  assert.equal(f.events().length,0);
+  // No invented yield/ratio threshold: this value can exceed live weight.
+  assert.equal((await f.call({body:{...input,weightGrams:90000}})).status,200);
+});
+
+test('carcass writes require current approval and reject invoiced/dispatched or stale records',async t=>{
+  const f=await fixture(t);
+  for(const inspection of [{status:'pending',revision:1},{status:'rejected',revision:1}]){f.animal().inspection=inspection;assert.equal((await f.call()).status,409);}
+  f.animal().inspection={status:'approved',revision:1};
+  assert.equal((await f.call({body:{...input,expectedRevision:2}})).status,409);
+  for(const key of ['billingInvoiceId','deliveryId']){f.animal()[key]='LINK';assert.equal((await f.call()).status,409);delete f.animal()[key];}
+  assert.equal((await f.call()).status,200);
+  assert.equal((await f.call()).status,409);
+  assert.equal((await f.call({body:{...input,expectedCarcassRevision:1}})).status,400);
+  f.animal().billingInvoiceId='INV';
+  assert.equal((await f.call({body:{...input,expectedCarcassRevision:1,reason:'Correction'}})).status,409);
+  assert.equal(f.events().length,1);
+});
+
+test('concurrent carcass entries/corrections have one winner per measurement revision',async t=>{
+  const f=await fixture(t);
+  assert.deepEqual((await Promise.all([f.call(),f.call()])).map(r=>r.status).sort(),[200,409]);
+  const body={...input,expectedCarcassRevision:1,reason:'Correction'};
+  assert.deepEqual((await Promise.all([f.call({body}),f.call({body})])).map(r=>r.status).sort(),[200,409]);
+  assert.equal(f.events().length,2);assert.equal(f.animal().carcassWeight.revision,2);
+});
+
+test('failed carcass audit leaves measurement unchanged and errors hide internal details',async t=>{
+  const f=await fixture(t);await f.call();const original=structuredClone(f.animal());f.state.failAudit=true;
+  const result=await f.call({body:{...input,expectedCarcassRevision:1,reason:'Correction'}});
+  assert.equal(result.status,503);assert.deepEqual(result.body,{message:'Animal operation failed. Refresh the record before retrying.'});
+  assert.deepEqual(f.animal(),original);assert.equal(f.events().length,1);
+});
+
+test('live corrections retain historical carcass linkage and require reinspection before carcass correction',async t=>{
+  const f=await fixture(t);await f.call();const carcass=structuredClone(f.animal().carcassWeight);
+  const correction=await f.call({suffix:'/ANM-A/correction',body:{vendorBusinessId:'VEN-A',species:'Pig',weightGrams:86000,weighedAt:at,expectedRevision:1,reason:'Live weight correction'}});
+  assert.equal(correction.status,200);assert.equal(correction.body.revision,2);assert.deepEqual(correction.body.carcassWeight,carcass);
+  const body={...input,expectedRevision:2,expectedCarcassRevision:1,reason:'Rechecked carcass'};
+  assert.equal((await f.call({body})).status,409);
+  assert.equal((await f.call({who:'inspector',suffix:'/ANM-A/inspection',body:{decision:'approved',expectedRevision:2,notes:'Reverified'}})).status,200);
+  const result=await f.call({body});assert.equal(result.status,200);assert.equal(result.body.carcassWeight.animalRevision,2);assert.equal(result.body.carcassWeight.revision,2);
+});
+
+test('billing prices are unchanged and its animal lock blocks later carcass saves',async t=>{
+  const f=await fixture(t);await f.call();const approved=structuredClone(f.animal().inspection);
+  const invoice=await f.billing.bill('ANM-A',{expectedRevision:1,feeScheduleVersion:1,dueDate:'2026-10-16'},{uid:'billing',role:'staff',municipalScopeId:'SCOPE',staffPermissions:['billing']},at);
+  assert.equal(invoice.totalCents,9500);assert.equal(invoice.total_amount,95);assert.equal(invoice.animalRevision,1);assert.deepEqual(f.animal().inspection,approved);
+  assert.equal((await f.call({body:{...input,expectedCarcassRevision:1,reason:'Late correction'}})).status,409);
+  assert.equal((await f.call({method:'GET',suffix:'/ANM-A'})).body.carcassWeightLocked,true);
+});
+
+test('invalid stored carcass data fails closed rather than being silently repaired',async t=>{
+  const f=await fixture(t);await f.call();f.animal().carcassWeight.weightGrams=1.5;
+  assert.equal((await f.call({method:'GET',suffix:'/ANM-A'})).status,503);
+  assert.equal((await f.call({body:{...input,expectedCarcassRevision:1,reason:'Correction'}})).status,503);assert.equal(f.events().length,1);
+});

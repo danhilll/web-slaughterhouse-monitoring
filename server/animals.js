@@ -9,8 +9,10 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 const text = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= max;
 const timestamp = v => typeof v === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(v) && Number.isFinite(Date.parse(v));
 export const animalBillingEligible = a => a.inspection?.status === 'approved' && a.inspection.revision === a.revision;
-const view = a => ({...Object.fromEntries(['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','createdBy','updatedAt','updatedBy'].map(k => [k,a[k]])),inspection:Object.fromEntries(['status','revision','inspectorUid','decidedAt','notes'].filter(k=>a.inspection?.[k]!==undefined).map(k=>[k,a.inspection[k]]))});
-const validRecord = a => validId(a.id) && validId(a.vendorBusinessId) && ['Cow','Pig'].includes(a.species) && Number.isSafeInteger(a.weightGrams) && a.weightGrams>0 && timestamp(a.weighedAt) && text(a.identifier,80) && ['manual','rfid'].includes(a.identifierType) && Number.isSafeInteger(a.revision) && a.revision>0 && ['pending','approved','rejected'].includes(a.inspection?.status) && a.inspection.revision===a.revision;
+const carcassKeys = ['weightGrams','weighedAt','revision','animalRevision','recordedAt','recordedBy'];
+const validCarcass = c => c == null || (Number.isSafeInteger(c.weightGrams) && c.weightGrams > 0 && timestamp(c.weighedAt) && Number.isSafeInteger(c.revision) && c.revision > 0 && Number.isSafeInteger(c.animalRevision) && c.animalRevision > 0 && timestamp(c.recordedAt) && validId(c.recordedBy));
+const view = a => ({...Object.fromEntries(['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','createdBy','updatedAt','updatedBy'].map(k => [k,a[k]])),inspection:Object.fromEntries(['status','revision','inspectorUid','decidedAt','notes'].filter(k=>a.inspection?.[k]!==undefined).map(k=>[k,a.inspection[k]])),carcassWeight:a.carcassWeight?Object.fromEntries(carcassKeys.map(k=>[k,a.carcassWeight[k]])):null,carcassWeightLocked:Boolean(a.billingInvoiceId||a.deliveryId)});
+const validRecord = a => validCarcass(a.carcassWeight) && (!a.carcassWeight || a.carcassWeight.animalRevision<=a.revision) && validId(a.id) && validId(a.vendorBusinessId) && ['Cow','Pig'].includes(a.species) && Number.isSafeInteger(a.weightGrams) && a.weightGrams>0 && timestamp(a.weighedAt) && text(a.identifier,80) && ['manual','rfid'].includes(a.identifierType) && Number.isSafeInteger(a.revision) && a.revision>0 && ['pending','approved','rejected'].includes(a.inspection?.status) && a.inspection.revision===a.revision;
 const inventory = p => p.role === 'admin' || (p.role === 'staff' && p.staffPermissions.includes('inventory'));
 const readable = (a,p) => a?.municipalScopeId === p.municipalScopeId && (p.role !== 'vendor' || a.vendorBusinessId === p.vendorBusinessId);
 function validateDetails(b) {
@@ -100,11 +102,12 @@ export function createAnimalMobileAuth(getAuth,store) {
   };
 }
 
-export function createAnimalRouter({store,enabled=false,operationsEnabled=false,getPrincipal,cursorSecret=randomBytes(32),now=()=>new Date().toISOString()}) {
+export function createAnimalRouter({store,enabled=false,operationsEnabled=false,carcassWeightEnabled=false,getPrincipal,cursorSecret=randomBytes(32),now=()=>new Date().toISOString()}) {
   const router=Router();
   router.param('id',(req,res,next,value)=>validId(value)?next():res.status(400).json({message:'Invalid animal ID.'}));
   router.use((req,res,next)=>{res.set('Cache-Control','no-store');const p=getPrincipal(req);if(!p||!validId(p.uid)||!validId(p.municipalScopeId))return res.status(403).json({message:'Authorized municipal access is required.'});req.animalPrincipal=p;next();});
-  router.get('/settings',(req,res)=>res.json({enabled,canRecord:inventory(req.animalPrincipal),canInspect:req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false}));
+  // Only the isolated rehearsal adapter opts in. No production environment flag enables this.
+  router.get('/settings',(req,res)=>res.json({enabled,canRecord:inventory(req.animalPrincipal),canInspect:req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false,carcassWeightEnabled:enabled&&carcassWeightEnabled===true,canRecordCarcassWeight:enabled&&carcassWeightEnabled===true&&inventory(req.animalPrincipal),carcassDefinitionStatus:'awaiting_confirmation'}));
   router.use((req,res,next)=>enabled?next():res.status(503).json({message:'Animal workflow is awaiting pilot activation.'}));
   const run=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.status||503).json({message:e.status?e.message:'Animal operation failed. Refresh the record before retrying.'});}};
   const signed=value=>createHmac('sha256',cursorSecret).update(value).digest('base64url');
@@ -167,6 +170,26 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     const result=await store.mutate(req.params.id,p,a=>{
       if(a.revision!==b.expectedRevision||a.inspection.status!=='pending')throw fail(409,'This revision is no longer awaiting inspection. Refresh the record.');
       return {after:{...a,inspection:{status:b.decision,revision:a.revision,inspectorUid:p.uid,decidedAt:now(),notes:b.notes.trim()},updatedAt:now(),updatedBy:p.uid},action:`inspection_${b.decision}`,reason:b.notes.trim()};
+    });res.json(view(result));
+  }));
+  router.post('/:id/carcass-weight',run(async(req,res)=>{
+    const p=req.animalPrincipal;
+    if(!inventory(p))throw fail(403,'Inventory recording permission is required.');
+    if(carcassWeightEnabled!==true)throw fail(503,'Carcass recording is disabled pending slaughterhouse definition approval.');
+    const b=req.body,at=now();
+    if(Object.keys(req.query).length || !b || Array.isArray(b) || typeof b!=='object' ||
+        Object.keys(b).some(k=>!['weightGrams','weighedAt','expectedRevision','expectedCarcassRevision','reason'].includes(k)) ||
+        !Number.isSafeInteger(b.weightGrams)||b.weightGrams<=0||!timestamp(b.weighedAt)||Date.parse(b.weighedAt)>Date.parse(at)+60000||
+        !Number.isSafeInteger(b.expectedRevision)||b.expectedRevision<1||!Number.isSafeInteger(b.expectedCarcassRevision)||b.expectedCarcassRevision<0||
+        (b.reason!==undefined&&(!text(b.reason,500)||/[\u0000-\u001f\u007f]/.test(b.reason))))throw fail(400,'Provide positive integer grams, a valid weighing time, current animal and carcass revisions, and supported fields.');
+    const result=await store.mutate(req.params.id,p,a=>{
+      if(!validCarcass(a.carcassWeight)||a.carcassWeight?.revision===Number.MAX_SAFE_INTEGER)throw fail(503,'Carcass measurement requires administrator review.');
+      if(a.revision!==b.expectedRevision || (a.carcassWeight?.revision??0)!==b.expectedCarcassRevision)throw fail(409,'This record changed. Refresh animal and carcass revisions before retrying.');
+      if(!animalBillingEligible(a))throw fail(409,'Inspector approval of the current animal revision is required.');
+      if(a.billingInvoiceId||a.deliveryId)throw fail(409,'Carcass weight cannot change after invoicing or dispatch.');
+      if(a.carcassWeight&&!text(b.reason,500))throw fail(400,'A reason is required to correct carcass weight.');
+      const carcassWeight={weightGrams:b.weightGrams,weighedAt:new Date(b.weighedAt).toISOString(),revision:b.expectedCarcassRevision+1,animalRevision:a.revision,recordedAt:at,recordedBy:p.uid};
+      return {after:{...a,carcassWeight,updatedAt:at,updatedBy:p.uid},action:a.carcassWeight?'carcass_weight_corrected':'carcass_weight_recorded',reason:b.reason?.trim()||''};
     });res.json(view(result));
   }));
   router.use((req,res)=>res.status(405).json({message:'Animal operation is unavailable. Records are not deleted.'}));

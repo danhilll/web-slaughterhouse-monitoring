@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { createAccountsRouter, createFirebaseInvitationSender } from './accounts.js';
+import { createAccountsRouter, createAccountStore, createFirebaseInvitationSender } from './accounts.js';
 import { createWebAdminMiddleware, createWriteGuard } from './access.js';
 
 async function fixture(t, options = {}) {
-  const state = { users: new Map(), accounts: new Map(), memberships: new Map(), vendors: new Map(), events: [], mail: 0, time: Date.now(), ...options };
+  const state = { users: new Map(), accounts: new Map(), memberships: new Map(), profiles: new Map(), vendors: new Map(), events: [], mail: 0, time: Date.now(), ...options };
   const auth = {
     verifyIdToken: async token => { if (token === 'expired') throw { code: 'auth/id-token-expired' }; return { uid: token }; },
     createUser: async u => { if ([...state.users.values()].some(x => x.email === u.email)) throw { code: 'auth/email-already-exists' }; state.users.set(u.uid, { ...u, customClaims: { preserved: true } }); },
-    getUser: async uid => state.users.get(uid),
+    getUser: async uid => { if (state.identityFail) throw Error('private Auth failure'); return state.users.get(uid); },
     getUserByEmail: async email => { const u=[...state.users.values()].find(u=>u.email===email); if(!u)throw {code:'auth/user-not-found'};return u; },
     setCustomUserClaims: async (uid, claims) => { if (state.claimsFail) throw Error('private failure'); state.users.get(uid).customClaims = claims; },
     updateUser: async (uid, patch) => { if (state.disableFail && patch.disabled) throw Error('private failure'); Object.assign(state.users.get(uid), patch); },
@@ -23,7 +23,7 @@ async function fixture(t, options = {}) {
     vendors: async () => [{ id: 'VEN-A', name: 'Synthetic vendor' }],
     audit: async () => [],
     prepare: async a => { if([...state.accounts.values()].some(x=>x.email===a.email))throw Object.assign(Error('Already reserved'),{status:409});state.accounts.set(a.uid,{...a}); },
-    provision: async a => { state.accounts.set(a.uid, { ...a }); state.memberships.set(a.uid, { status: 'pending' }); },
+    provision: async a => { state.accounts.set(a.uid, { ...a }); state.memberships.set(a.uid, { role:a.role, municipalScopeId:a.municipalScopeId, ...(a.staffPermissions ? {staffPermissions:a.staffPermissions} : {}), status: 'pending' }); state.profiles.set(a.uid,{email:a.email,role:a.role,municipalScopeId:a.municipalScopeId,status:'pending'}); },
     recordFailure: async a => state.accounts.set(a.uid, { ...a, status: 'provisioning_failed' }),
     staffPermissions: async(uid, permissions) => { state.accounts.get(uid).staffPermissions=permissions;state.memberships.get(uid).staffPermissions=permissions; },
     reserveInvitation: async (uid, actor, at) => {
@@ -32,11 +32,27 @@ async function fixture(t, options = {}) {
       if (a.lastInvitationAt && Date.parse(at)-Date.parse(a.lastInvitationAt)<60000) throw Object.assign(Error('Wait'),{status:429});
       a.lastInvitationAt=at;
     },
-    update: async (uid, patch, status, actor, action) => { Object.assign(state.accounts.get(uid), patch); if (status) state.memberships.set(uid,{status}); state.events.push([action,uid]); }
+    update: async (uid, patch, status, actor, action) => { Object.assign(state.accounts.get(uid), patch); if (status) { Object.assign(state.memberships.get(uid),{status}); Object.assign(state.profiles.get(uid),{status}); } state.events.push([action,uid]); }
   };
+  // Exercise the real activation transaction, staging writes until commit.
+  const mapFor = path => ({managed_accounts:state.accounts,mobile_memberships:state.memberships,Users:state.profiles})[path.split('/')[0]];
+  store.activate = createAccountStore(() => ({
+    doc:path=>path, collection:()=>({doc:()=> 'account_audit/event'}),
+    runTransaction:async fn=>{
+      state.beforeActivation?.();
+      const writes=[];
+      await fn({
+        get:async path=>({data:()=>structuredClone(mapFor(path).get(path.split('/')[1]))}),
+        update:(path,patch)=>writes.push(()=>Object.assign(mapFor(path).get(path.split('/')[1]),patch)),
+        create:(path,event)=>{if(state.auditFail)throw Error('private audit failure');writes.push(()=>state.events.push([event.action,event.targetUid,event.actorUid]));}
+      });
+      if(state.activationFail)throw Error('private commit failure');
+      writes.forEach(write=>write());
+    }
+  })).activate;
   const app = express();
   app.use('/api', createWebAdminMiddleware(() => auth, new Set(['ADMIN'])));
-  app.use('/api/accounts', express.json(), createAccountsRouter({ getAuth: () => auth, store, enabled: options.enabled ?? true, scope:'SCOPE-A', adminUids:new Set(['ADMIN']), now: () => new Date(state.time).toISOString(), sendInvitation: async () => {state.mail++; if(state.mailFail) throw Error('mail');} }));
+  app.use('/api/accounts', express.json(), createAccountsRouter({ getAuth: () => auth, store, enabled: options.enabled ?? true, ...(options.activationEnabled === null ? {} : {activationEnabled:options.activationEnabled ?? true}), scope:'SCOPE-A', adminUids:new Set(['ADMIN']), now: () => new Date(state.time).toISOString(), sendInvitation: async () => {state.mail++; if(state.mailFail) throw Error('mail');} }));
   app.use('/api',createWriteGuard(false));
   app.post('/api/invoices',(req,res)=>res.json({unsafe:true}));
   const server=app.listen(0,'127.0.0.1'); await new Promise(r=>server.once('listening',r));
@@ -130,4 +146,81 @@ test('staff functions are explicit, restricted to staff, and reassignment preser
   const r=await call('','POST',{fullName:'Synthetic Staff',email:'staff@example.test',role:'staff',staffPermissions:['inventory']});assert.equal(r.status,201);assert.deepEqual(r.body.account.staffPermissions,['inventory']);
   const uid=r.body.account.uid;assert.equal((await call(`/${uid}/permissions`,'POST',{staffPermissions:['billing','delivery']})).status,200);assert.equal(state.memberships.get(uid).status,'pending');assert.deepEqual(state.memberships.get(uid).staffPermissions,['billing','delivery']);
   assert.equal((await call(`/${uid}/permissions`,'POST',{staffPermissions:['admin']})).status,400);
+});
+
+const staffForm = {fullName:'Synthetic activation',email:'activation@example.test',role:'staff',staffPermissions:['inventory']};
+test('activation is administrator-only and separately disabled by default',async t=>{
+  for (const options of [{enabled:false},{activationEnabled:false},{activationEnabled:null}]) {
+    const {call,state}=await fixture(t,options);
+    assert.equal((await call('/settings')).body.staffInspectorAvailable,false);
+    assert.equal((await call('/TARGET/activate','POST',{})).status,503);
+    assert.equal(state.events.length,0);
+  }
+  const {call,state}=await fixture(t);
+  const uid=(await call('','POST',staffForm)).body.account.uid;
+  for(const [token,status] of [[null,401],['VENDOR',403],['expired',401]]) assert.equal((await call(`/${uid}/activate`,'POST',{},token)).status,status);
+  assert.equal((await call(`/${uid}/activate`,'POST',{role:'admin'})).status,400);
+  assert.equal(state.memberships.get(uid).status,'pending');
+});
+test('activation atomically opens matching pending staff/inspector records and audits without changing Auth',async t=>{
+  const {call,state}=await fixture(t);
+  for(const role of ['staff','inspector']) {
+    const uid=(await call('','POST',{...staffForm,role,email:`activation-${role}@example.test`,staffPermissions:role==='staff'?['inventory']:[]})).body.account.uid;
+    const identity=structuredClone(state.users.get(uid));
+    state.memberships.get(uid).preserved='membership data';state.profiles.get(uid).preserved=true;
+    assert.equal((await call(`/${uid}/activate`,'POST',{})).status,200);
+    for(const map of [state.accounts,state.memberships,state.profiles])assert.equal(map.get(uid).status,'active');
+    assert.deepEqual(state.users.get(uid),identity);
+    assert.equal(state.memberships.get(uid).preserved,'membership data');assert.equal(state.profiles.get(uid).preserved,true);
+    assert.deepEqual(state.events.at(-1),['activated',uid,'ADMIN']);
+    assert.equal((await call(`/${uid}/activate`,'POST',{})).status,409);
+  }
+});
+test('activation rejects protected targets, cross-scope records, invalid transitions and mismatched identity',async t=>{
+  const cases=[
+    s=>s.accounts.get(s.uid).role='vendor', s=>s.accounts.get(s.uid).role='admin',
+    s=>s.accounts.get(s.uid).uid='DIFFERENT',
+    s=>s.memberships.get(s.uid).municipalScopeId='OTHER', s=>s.profiles.get(s.uid).municipalScopeId='OTHER',
+    s=>s.memberships.get(s.uid).role='inspector', s=>s.profiles.get(s.uid).role='vendor',
+    s=>s.memberships.get(s.uid).vendorBusinessId='VEN-A',
+    s=>s.accounts.get(s.uid).status='inactive', s=>s.memberships.get(s.uid).status='active',
+    s=>s.profiles.get(s.uid).status='provisioning_failed',
+    s=>s.profiles.get(s.uid).email='other@example.test', s=>s.profiles.delete(s.uid), s=>s.memberships.delete(s.uid),
+    s=>s.users.get(s.uid).uid='DIFFERENT', s=>s.users.get(s.uid).email='other@example.test',
+    s=>s.users.get(s.uid).disabled=true, s=>s.users.delete(s.uid),
+    s=>s.users.get(s.uid).customClaims.municipalRole='admin',
+    s=>s.users.get(s.uid).customClaims.municipalScopeId='OTHER',
+    s=>{s.accounts.get(s.uid).staffPermissions=[];s.memberships.get(s.uid).staffPermissions=[];},
+    s=>s.memberships.get(s.uid).staffPermissions=['billing'],
+    s=>{s.accounts.get(s.uid).staffPermissions=['inventory','inventory'];s.memberships.get(s.uid).staffPermissions=['inventory','inventory'];},
+    s=>{s.accounts.get(s.uid).staffPermissions=['admin'];s.memberships.get(s.uid).staffPermissions=['admin'];}
+  ];
+  for(const change of cases){
+    const {call,state}=await fixture(t);state.uid=(await call('','POST',staffForm)).body.account.uid;
+    change(state);const before=structuredClone([state.accounts,state.memberships,state.profiles,state.users,state.events]);
+    assert.equal((await call(`/${state.uid}/activate`,'POST',{})).status,409);
+    assert.deepEqual([state.accounts,state.memberships,state.profiles,state.users,state.events],before);
+  }
+  const {call,state}=await fixture(t);
+  state.accounts.set('ADMIN',{uid:'ADMIN',municipalScopeId:'SCOPE-A',role:'staff',status:'pending'});
+  state.accounts.set('OTHER',{uid:'OTHER',municipalScopeId:'SCOPE-B',role:'staff',status:'pending'});
+  assert.equal((await call('/ADMIN/activate','POST',{})).status,409);
+  assert.equal((await call('/OTHER/activate','POST',{})).status,404);
+});
+test('activation failures leave all access pending, preserve claims and hide internal errors',async t=>{
+  for(const failure of ['identityFail','activationFail','auditFail']){
+    const {call,state}=await fixture(t);const uid=(await call('','POST',staffForm)).body.account.uid;
+    const before=structuredClone([state.accounts,state.memberships,state.profiles,state.users,state.events]);
+    state[failure]=true;
+    const r=await call(`/${uid}/activate`,'POST',{});assert.equal(r.status,503);assert.equal(JSON.stringify(r.body).includes('private'),false);
+    assert.deepEqual([state.accounts,state.memberships,state.profiles,state.users,state.events],before);
+    state[failure]=false;assert.equal((await call(`/${uid}/activate`,'POST',{})).status,200);
+  }
+});
+test('activation rechecks transactional state after the initial directory read',async t=>{
+  const {call,state}=await fixture(t);const uid=(await call('','POST',staffForm)).body.account.uid;
+  state.beforeActivation=()=>{state.memberships.get(uid).status='inactive';};
+  assert.equal((await call(`/${uid}/activate`,'POST',{})).status,409);
+  assert.equal(state.memberships.get(uid).status,'inactive');assert.equal(state.accounts.get(uid).status,'pending');
+  assert.equal(state.events.some(e=>e[0]==='activated'),false);
 });

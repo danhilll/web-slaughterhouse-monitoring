@@ -103,6 +103,27 @@ export function createAccountStore(getDb) {
         tx.create(db().collection('account_audit').doc(), { action, actorUid: actor, targetUid: uid, at: new Date().toISOString() });
       });
     },
+    async activate(uid, scope, actor, checkIdentity) {
+      await db().runTransaction(async tx => {
+        const a = (await tx.get(managed(uid))).data();
+        const membership = db().doc(`mobile_memberships/${uid}`), user = db().doc(`Users/${uid}`);
+        const m = (await tx.get(membership)).data(), u = (await tx.get(user)).data();
+        if (!a || a.uid !== uid || !['staff', 'inspector'].includes(a.role) ||
+            [a, m, u].some(row => !row || row.role !== a.role || row.status !== 'pending' || row.municipalScopeId !== scope || row.vendorBusinessId !== undefined || row.vendorID !== undefined) ||
+            !text(a.email, 254) || u.email !== a.email) throw fail(409, 'Only matching pending staff or inspector accounts can be activated.');
+        const permissions = a.staffPermissions ?? [], assigned = m.staffPermissions ?? [];
+        if ([permissions, assigned].some(p => !Array.isArray(p) || p.length > STAFF_PERMISSIONS.length || new Set(p).size !== p.length || p.some(value => !STAFF_PERMISSIONS.includes(value))) ||
+            permissions.length !== assigned.length || permissions.some(p => !assigned.includes(p)) ||
+            (a.role === 'staff' ? permissions.length === 0 : permissions.length !== 0)) throw fail(409, 'Review and save explicit staff functions before activation.');
+        // Auth is read-only. A failed identity check cannot open membership;
+        // Firestore retries recheck all records and Auth before committing.
+        await checkIdentity(a);
+        tx.update(managed(uid), { status: 'active' });
+        tx.update(membership, { status: 'active' });
+        tx.update(user, { status: 'active' });
+        tx.create(db().collection('account_audit').doc(), { action: 'activated', actorUid: actor, targetUid: uid, at: new Date().toISOString() });
+      });
+    },
     async staffPermissions(uid, permissions, scope, actor) {
       await db().runTransaction(async tx => {
         const a = await tx.get(managed(uid));
@@ -134,14 +155,14 @@ export function createFirebaseInvitationSender({ apiKey, emulatorHost, fetchImpl
 
 // Must be mounted after web administrator authentication, before the separately
 // paused business-write routes. No role/admin assignment is accepted from clients.
-export function createAccountsRouter({ getAuth, store, enabled = false, scope = '', municipalityName = '', adminUids = new Set(), sendInvitation, now = () => new Date().toISOString() }) {
+export function createAccountsRouter({ getAuth, store, enabled = false, activationEnabled = false, scope = '', municipalityName = '', adminUids = new Set(), sendInvitation, now = () => new Date().toISOString() }) {
   const router = Router();
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
     if (!req.webUser || !adminUids.has(req.webUser.uid)) return res.status(403).json({ message: 'Web administrator access is required.' });
     next();
   });
-  router.get('/settings', (req, res) => res.json({ enabled: enabled && id(scope), municipalScopeId: id(scope) ? scope : null, municipalityName, roles: [...roles], staffInspectorAvailable: false }));
+  router.get('/settings', (req, res) => res.json({ enabled: enabled && id(scope), municipalScopeId: id(scope) ? scope : null, municipalityName, roles: [...roles], staffInspectorAvailable: enabled && id(scope) && activationEnabled }));
   router.use((req, res, next) => {
     if (!enabled || !id(scope)) return res.status(503).json({ message: 'Account management is awaiting approved municipal setup.' });
     next();
@@ -260,6 +281,19 @@ export function createAccountsRouter({ getAuth, store, enabled = false, scope = 
     if (Object.keys(req.body || {}).length) throw fail(400, 'Invitation requests do not accept account changes.');
     const a = await owned(req.params.uid);
     res.json({ invitationStatus: await invite(a, req.webUser.uid) });
+  }));
+  router.post('/:uid/activate', run(async (req, res) => {
+    if (!activationEnabled) throw fail(503, 'Staff activation is awaiting approved municipal setup.');
+    if (Object.keys(req.body || {}).length) throw fail(400, 'Activation requests do not accept account changes.');
+    const a = await owned(req.params.uid);
+    await store.activate(a.uid, scope, req.webUser.uid, async account => {
+      let identity;
+      try { identity = await auth().getUser(account.uid); }
+      catch (e) { if (e.code === 'auth/user-not-found') throw fail(409, 'Account identity needs administrator review.'); throw e; }
+      if (!identity || identity.uid !== account.uid || identity.disabled !== false || identity.email !== account.email ||
+          identity.customClaims?.municipalRole !== account.role || identity.customClaims?.municipalScopeId !== scope) throw fail(409, 'Account identity needs administrator review.');
+    });
+    res.json({ success: true, message: 'Mobile access activated with the existing role and assigned functions.' });
   }));
   router.post('/:uid/permissions', run(async (req, res) => {
     const b = req.body || {}, permissions = b.staffPermissions;

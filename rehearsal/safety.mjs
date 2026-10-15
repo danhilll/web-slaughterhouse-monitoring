@@ -3,6 +3,11 @@ import https from 'node:https';
 import net from 'node:net';
 
 export const PROJECT_ID = 'demo-mobile-rehearsal';
+export function rehearsalCarcassWeightEnabled(args = process.argv, env = process.env) {
+  if (!args.includes('--enable-carcass-weight')) return false;
+  assertEmulators(env);
+  return true;
+}
 const loopback = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 export function assertEmulators(env = process.env) {
   for (const key of ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT', 'FIREBASE_PROJECT_ID']) {
