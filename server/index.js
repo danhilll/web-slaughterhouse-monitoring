@@ -1,4 +1,6 @@
 import express from 'express';
+import { summarizeHeadcounts, summarizeAmounts, validDay } from '../shared/reporting.js';
+import { createScopedListRouter } from './scoped-lists.js';
 import { createScopedReads } from './scoped-reads.js';
 import { loadProductionConfig, assertProductionProject } from './production-config.js';
 import cors from 'cors';
@@ -612,10 +614,9 @@ const buildDashboard = async () => {
 
   const totalVendors = vendorList.filter((v) => v.status === 'Active').length;
   const totalRecordsToday = slaughterRecords.filter((r) => r.date === today).length;
-  const totalRecordsThisMonth = slaughterRecords.filter((r) => r.date >= monthStart).length;
-  const totalRevenueThisMonth = invoices
-    .filter((inv) => inv.date_issued >= monthStart)
-    .reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
+  const totalRecordsThisMonth = slaughterRecords.filter((r) => validDay(r.date)&&r.date.slice(0,7)===manilaMonthKey()).length;
+  const revenueCoverage=summarizeAmounts(invoices.filter(inv=>validDay(inv.date_issued)&&inv.date_issued.slice(0,7)===manilaMonthKey()),'total_amount',invoices.filter(inv=>!validDay(inv.date_issued)).length);
+  const totalRevenueThisMonth=revenueCoverage.value;
   const unpaidInvoicesCount = invoices.filter((inv) => inv.payment_status !== 'Paid').length;
 
   const recentSlaughterRecords = [...slaughterRecords].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10).map(join);
@@ -627,55 +628,29 @@ const buildDashboard = async () => {
   const currentMonthKey = manilaMonthKey();
   const monthlySlaughterVolume = Array.from({ length: 6 }, (_, i) => {
     const key = shiftMonthKey(currentMonthKey, i - 5);
-    const monthRecords = slaughterRecords.filter((r) => (r.date || '').slice(0, 7) === key);
-    let cowTotal = 0;
-    let pigTotal = 0;
-    monthRecords.forEach((r) => {
-      const heads = Number(r.number_of_heads || 0);
-      const cowSplit = Number(r.number_of_heads_cow ?? NaN);
-      const pigSplit = Number(r.number_of_heads_pig ?? NaN);
-      if (r.animal_type === 'Cow') cowTotal += heads;
-      else if (r.animal_type === 'Pig') pigTotal += heads;
-      else if (r.animal_type === 'Both') {
-        // Prefer explicit split when present, otherwise split evenly to avoid double-billing volume.
-        if (Number.isFinite(cowSplit) && Number.isFinite(pigSplit)) {
-          cowTotal += cowSplit;
-          pigTotal += pigSplit;
-        } else {
-          cowTotal += Math.ceil(heads / 2);
-          pigTotal += Math.floor(heads / 2);
-        }
-      }
-    });
-    return {
-      month: monthLabelForKey(key),
-      Cow: cowTotal,
-      Pig: pigTotal
-    };
+    const coverage=summarizeHeadcounts(slaughterRecords.filter(r=>validDay(r.date)&&r.date.slice(0,7)===key),slaughterRecords.filter(r=>!validDay(r.date)).length);
+    return {month:monthLabelForKey(key),Cow:coverage.Cow,Pig:coverage.Pig,coverage};
   });
 
-  const feeBreakdown = feeConfig.map((fee) => ({
-    name: fee.label,
-    value: invoices.reduce((sum, invoice) => {
-      const key = fee.id;
-      if (key === 'corral_casket_fee') return sum + Number(invoice.corral_fee || 0);
-      if (key === 'delivery_fee') return sum + Number(invoice.delivery_fee || 0);
-      if (key === 'anti_mortem_fee') return sum + Number(invoice.anti_mortem_fee || 0);
-      return sum + Number(invoice.facility_fee || 0);
-    }, 0)
-  }));
-
+  const feeBreakdown=feeConfig.map(fee=>{
+    const field=({corral_casket_fee:'corral_fee',delivery_fee:'delivery_fee',anti_mortem_fee:'anti_mortem_fee'})[fee.id]||'facility_fee';
+    const coverage=summarizeAmounts(invoices,field);return {name:fee.label,value:coverage.value,coverage};
+  });
+  const undatedRecords=slaughterRecords.filter(row=>!validDay(row.date)).length;
   return {
     summary: {
       totalVendors,
-      totalRecordsToday,
-      totalRecordsThisMonth,
+      totalRecordsToday:undatedRecords?null:totalRecordsToday,
+      totalRecordsThisMonth:undatedRecords?null:totalRecordsThisMonth,
       totalRevenueThisMonth,
       unpaidInvoicesCount
     },
     recentSlaughterRecords,
     recentInvoices,
     monthlySlaughterVolume,
+    headcountCoverage:{...summarizeHeadcounts(slaughterRecords),undatedRecords},
+    recordDateCoverage:{undatedRecords,knownRecordsToday:totalRecordsToday,knownRecordsThisMonth:totalRecordsThisMonth},
+    revenueCoverage,
     feeBreakdown,
     municipality: MUNICIPALITY
   };
@@ -706,6 +681,7 @@ app.use('/api/mobile', createMobileRouter({
   store: createMobileFirestoreStore(() => firestoreDb), ...routerConfig('mobile')
 }));
 app.use('/api', createWebAdminMiddleware(() => firebaseAuth, WEB_ADMIN_UIDS));
+if (production) app.use('/api', createScopedListRouter({store:scopedReads, scope:production.municipalScopeId, cursorSecret:production.cursorSecret('web-lists')}));
 app.use('/api/operations', express.json({ limit: '16kb' }), createOperationsRouter({
   store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(), ...routerConfig('operations'),
   getPrincipal: req => req.webUser ? { uid: req.webUser.uid, role: 'admin', municipalScopeId: municipalScope, staffPermissions: [] } : null
@@ -950,12 +926,12 @@ app.get('/api/invoices', asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/invoices/:id', asyncHandler(async (req, res) => {
-  const [vendorList, invoice] = await Promise.all([store.listVendors(), store.getInvoice(req.params.id)]);
+  const invoice = await store.getInvoice(req.params.id);
   if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
   res.json({
     ...invoice,
     municipality: MUNICIPALITY,
-    vendor: vendorList.find((v) => v.id === invoice.vendor_id) || null
+    vendor: typeof invoice.vendor_id === 'string' && invoice.vendor_id.length > 0 && !invoice.vendor_id.includes('/') ? await store.getVendor(invoice.vendor_id) : null
   });
 }));
 

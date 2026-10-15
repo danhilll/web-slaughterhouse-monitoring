@@ -1,0 +1,15 @@
+export type HistoricalRow = {animal_type?: unknown;number_of_heads?: unknown;number_of_heads_cow?: unknown;number_of_heads_pig?: unknown};
+export type HeadcountCoverage = {records:number;totalCovered:number;speciesCovered:number;knownHeads:number|null;knownCow:number|null;knownPig:number|null;unknownSpecies:number;invalidTotals:number;invalidSplits:number;undatedRecords:number;totalComplete:boolean;speciesComplete:boolean;totalHeads:number|null;Cow:number|null;Pig:number|null};
+export type AmountCoverage = {value:number|null;knownValue:number|null;covered:number;records:number;complete:boolean;undatedRecords:number};
+export function readHeadcount(value:unknown):number|null;
+export function readAmount(value:unknown):number|null;
+export function headcountText(value:unknown):string;
+export function speciesText(value:unknown):string;
+export function validDay(value:unknown):boolean;
+export function recordedHeads(row:HistoricalRow):{total:number|null;Cow:number|null;Pig:number|null;complete:boolean};
+export function summarizeHeadcounts(rows:HistoricalRow[],undatedRecords?:number):HeadcountCoverage;
+export function headcountCoverageText(report:HeadcountCoverage):string;
+export function invoiceHeadcounts(row:HistoricalRow):{Cow:number|null;Pig:number|null;total:number|null;coverage:string};
+export function invoiceHeadcountLines(row:HistoricalRow):string[];
+export function summarizeAmounts(rows:object[],field:string,unplaced?:number):AmountCoverage;
+export function amountCoverageText(report:AmountCoverage):string;

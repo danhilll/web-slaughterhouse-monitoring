@@ -43,6 +43,8 @@ import { jsPDF } from 'jspdf';
 import type { DashboardData, FeeConfig, Invoice, NotificationItem, SlaughterRecord, Vendor } from './types';
 import type { WebSession } from './AuthGate';
 import { apiFetch } from './api';
+import { recordedHeads, readHeadcount, readAmount, headcountText, speciesText, summarizeHeadcounts, headcountCoverageText, invoiceHeadcounts, invoiceHeadcountLines, summarizeAmounts, amountCoverageText, validDay } from '../shared/reporting.js';
+import { fetchCompleteList, listViewState } from './listPages';
 import { UsersPage } from './UsersPage';
 import { AnimalsPage } from './AnimalsPage';
 import { OperationsPage } from './OperationsPage';
@@ -67,12 +69,12 @@ const ChartTooltip = ({ active, payload, label, money }: any) => {
   );
 };
 
-const formatCurrency = (value: number) =>
+const formatCurrency = (value: unknown) => readAmount(value)===null ? 'Unavailable (missing/invalid)' :
   new Intl.NumberFormat('en-PH', {
     style: 'currency',
     currency: 'PHP',
     minimumFractionDigits: 2
-  }).format(value || 0);
+  }).format(value as number);
 
 // Design-only presentational helpers (no business logic).
 // Centralizes status colors so pills look consistent like enterprise suites.
@@ -179,8 +181,8 @@ const parseErrorResponse = async (response: Response, fallback: string): Promise
   return new Error(`${fallback} (HTTP ${response.status})`);
 };
 
-const fetchJson = async <T,>(url: string): Promise<T> => {
-  const response = await apiFetch(url);
+const fetchJson = async <T,>(url: string, signal?: AbortSignal): Promise<T> => {
+  const response = await apiFetch(url, {signal});
   if (!response.ok) {
     throw await parseErrorResponse(response, `Request to ${url} failed`);
   }
@@ -219,11 +221,6 @@ type FeeForm = {
 const feesFromConfig = (config: FeeConfig[]): FeeForm =>
   Object.fromEntries(FEE_TYPES.map((t) => [t.formKey, getFeeAmount(config, t.id, t.fallback)])) as FeeForm;
 
-const splitBothHeads = (total: number) => ({
-  cow: Math.ceil(total / 2),
-  pig: Math.floor(total / 2)
-});
-
 function App({ session, onLogout }: { session: WebSession; onLogout: () => Promise<void> }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [slaughterRecords, setSlaughterRecords] = useState<SlaughterRecord[]>([]);
@@ -239,16 +236,21 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
   // other five responses; failed sections keep prior data and report here.
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
 
+  const listRequest = useRef<AbortController | null>(null);
   const loadData = async () => {
+    listRequest.current?.abort();
+    const request = new AbortController();
+    listRequest.current = request;
     setLoading(true);
     const results = await Promise.allSettled([
-      fetchJson<Vendor[]>('/api/vendors'),
-      fetchJson<SlaughterRecord[]>('/api/slaughter-records'),
-      fetchJson<Invoice[]>('/api/invoices'),
-      fetchJson<NotificationItem[]>('/api/notifications'),
-      fetchJson<DashboardData>('/api/dashboard'),
-      fetchJson<{ fee_config: FeeConfig[]; configured: boolean }>('/api/service-fees')
+      fetchCompleteList<Vendor>('/api/vendors', apiFetch, request.signal),
+      fetchCompleteList<SlaughterRecord>('/api/slaughter-records', apiFetch, request.signal),
+      fetchCompleteList<Invoice>('/api/invoices', apiFetch, request.signal),
+      fetchCompleteList<NotificationItem>('/api/notifications', apiFetch, request.signal),
+      fetchJson<DashboardData>('/api/dashboard', request.signal),
+      fetchJson<{ fee_config: FeeConfig[]; configured: boolean }>('/api/service-fees', request.signal)
     ]);
+    if (request.signal.aborted || listRequest.current !== request) return;
     const names = ['vendors', 'slaughter records', 'invoices', 'notifications', 'dashboard', 'service fees'] as const;
     const errors: Record<string, string> = {};
     const [vendorsRes, recordsRes, invoicesRes, notificationsRes, dashboardRes, feeRes] = results;
@@ -288,6 +290,7 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
       // ignore storage errors
     }
     void loadData();
+    return () => listRequest.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -360,25 +363,9 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
 
     const createdRecord = await response.json();
     if (auto_generate_invoice) {
-      let cowHeads = 0;
-      let pigHeads = 0;
-      if (createdRecord.animal_type === 'Cow') {
-        cowHeads = Number(createdRecord.number_of_heads || 0);
-      } else if (createdRecord.animal_type === 'Pig') {
-        pigHeads = Number(createdRecord.number_of_heads || 0);
-      } else if (createdRecord.animal_type === 'Both') {
-        // Prefer explicit split from the form; fall back to even split to avoid double-billing.
-        const explicitCow = Number(number_of_heads_cow);
-        const explicitPig = Number(number_of_heads_pig);
-        if (Number.isFinite(explicitCow) && Number.isFinite(explicitPig) && explicitCow + explicitPig > 0) {
-          cowHeads = explicitCow;
-          pigHeads = explicitPig;
-        } else {
-          const split = splitBothHeads(Number(createdRecord.number_of_heads || 0));
-          cowHeads = split.cow;
-          pigHeads = split.pig;
-        }
-      }
+      const counts=recordedHeads(createdRecord);
+      if(!counts.complete) throw new Error('Recorded species/headcounts are incomplete. No invoice was inferred; review the record.');
+      const cowHeads=counts.Cow!,pigHeads=counts.Pig!;
 
       const invoicePayload = {
         vendor_id: createdRecord.vendor_id,
@@ -610,7 +597,7 @@ function DashboardLayout({
   const profileRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
 
-  const unreadCount = notifications.filter((n: NotificationItem) => !n.is_read).length;
+  const unreadCount = (loading || loadErrors?.notifications) ? 0 : notifications.filter((n: NotificationItem) => !n.is_read).length;
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -779,6 +766,12 @@ function DashboardLayout({
                 {feesConfigured === false && <p>Fees shown are sample defaults. An approved fee schedule is required before billing.</p>}</div>
               </div>
             )}
+            {listViewState(location.pathname, loading, loadErrors).affected && <section className="mb-4" aria-busy={loading}>
+              <button className="btn-secondary" disabled={loading} onClick={() => void reloadData()}>{loading ? 'Loading all record pages…' : 'Refresh records'}</button>
+              {loading && <p role="status" className="mt-2 text-sm">Loading complete lists before showing records and reports.</p>}
+              {listViewState(location.pathname, loading, loadErrors).error && !loading && <p role="alert" className="mt-2 text-red-700">{listViewState(location.pathname, loading, loadErrors).error} Records and reports are unavailable until a complete refresh succeeds.</p>}
+            </section>}
+            <div hidden={listViewState(location.pathname, loading, loadErrors).blocked}>
             <Routes>
               <Route path="/" element={<DashboardPage loading={loading} dashboard={dashboard} loadError={loadErrors?.dashboard} onRetry={() => void reloadData()} />} />
               <Route path="/records" element={<SlaughterRecordsPage vendors={vendors} records={slaughterRecords} loading={loading} addRecord={addRecord} updateRecord={updateRecord} deleteRecord={deleteRecord} showToast={showToast} />} />
@@ -791,6 +784,7 @@ function DashboardLayout({
 <Route path="/operations" element={<OperationsPage />} />
               <Route path="/service-computation" element={<ServiceComputationPage feeConfig={feeConfig} updateFees={updateFees} showToast={showToast} />} />
             </Routes>
+            </div>
           </main>
         </div>
       </div>
@@ -821,12 +815,15 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
 
   const statCards = [
     { title: 'Total vendors', value: dashboard.summary.totalVendors, detail: 'In your vendor directory', icon: Users, to: '/vendors', tone: 'neutral' },
-    { title: 'Records today', value: dashboard.summary.totalRecordsToday, detail: `${dashboard.summary.totalRecordsThisMonth} records this month`, icon: ClipboardList, to: '/records', tone: 'neutral' },
+    { title: 'Records today', value: headcountText(dashboard.summary.totalRecordsToday), detail: `${headcountText(dashboard.summary.totalRecordsThisMonth)} records this month`, icon: ClipboardList, to: '/records', tone: 'neutral' },
     { title: 'Monthly revenue', value: formatCurrency(dashboard.summary.totalRevenueThisMonth), detail: 'Collected this month', icon: CreditCard, to: '/statistics', tone: 'accent' },
     { title: 'Unpaid invoices', value: dashboard.summary.unpaidInvoicesCount, detail: 'Awaiting payment', icon: FileText, to: '/invoices', tone: 'neutral' }
   ];
-  const hasVolume = dashboard.monthlySlaughterVolume.some((month) => month.Cow > 0 || month.Pig > 0);
-  const hasFees = dashboard.feeBreakdown.some((fee) => fee.value > 0);
+  const volumeRows=dashboard.monthlySlaughterVolume.map(row=>row.coverage?row:{...row,Cow:null,Pig:null});
+  const hasVolume = volumeRows.some(month=>(month.coverage?.records??0)>0 || month.coverage?.speciesComplete!==true);
+  const feesComplete=dashboard.feeBreakdown.every(fee=>readAmount(fee.value)!==null);
+  const hasRecordedFees=dashboard.feeBreakdown.some(fee=>(fee.coverage?.records??0)>0);
+  const hasFees = dashboard.feeBreakdown.some((fee) => (fee.value ?? 0) > 0);
 
   return (
     <div className="dashboard-composition dashboard-overview space-y-6">
@@ -843,6 +840,12 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
           {onRetry && <button type="button" onClick={onRetry} className="btn-secondary">Retry loading dashboard</button>}
         </div>
       )}
+      {volumeRows.some(row=>!row.coverage) && <p role="status">Species breakdown unavailable: historical coverage was not provided. Values are withheld rather than inferred.</p>}
+      {dashboard.headcountCoverage && <p className="text-sm" role="status">Historical register coverage (all scoped records): {headcountCoverageText(dashboard.headcountCoverage)}</p>}
+      {dashboard.recordDateCoverage && dashboard.recordDateCoverage.undatedRecords>0 && <p role="status">Date-based record totals unavailable/incomplete: {dashboard.recordDateCoverage.undatedRecords} undated/invalid-date records. Known dated counts: {dashboard.recordDateCoverage.knownRecordsToday} today; {dashboard.recordDateCoverage.knownRecordsThisMonth} this month.</p>}
+      {dashboard.revenueCoverage && !dashboard.revenueCoverage.complete && <p role="status">{amountCoverageText(dashboard.revenueCoverage)}</p>}
+      {dashboard.monthlySlaughterVolume.filter(row=>row.coverage && !row.coverage.speciesComplete).map(row=><p key={row.month} role="status">{row.month}: {headcountCoverageText(row.coverage!)} Unavailable values appear as gaps.</p>)}
+      {!feesComplete && <p role="status">Fee breakdown unavailable/incomplete. {dashboard.feeBreakdown.map(fee=>`${fee.name}: ${formatCurrency(fee.value)}${fee.coverage?' — '+amountCoverageText(fee.coverage):''}`).join(' ')}</p>}
       <section className="overview-hero" aria-label="Operations overview">
         <AmbientBackdrop />
         <div className="overview-hero-copy">
@@ -895,8 +898,8 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
                   <tr key={record.id}>
                     <td className="tnum whitespace-nowrap">{formatDate(record.date)}</td>
                     <td className="dashboard-vendor">{record.vendor_name || 'Vendor unavailable'}</td>
-                    <td>{record.animal_type}</td>
-                    <td className="dashboard-number font-semibold">{record.number_of_heads}</td>
+                    <td>{speciesText(record.animal_type)}</td>
+                    <td className="dashboard-number font-semibold">{headcountText(record.number_of_heads)}{!recordedHeads(record).complete && <span className="block text-xs">{headcountCoverageText(summarizeHeadcounts([record]))}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -951,7 +954,7 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
           <div className="h-72">
             {!hasVolume ? <ChartEmptyState title="Your activity will take shape here" message="Monthly livestock volume appears as slaughter records are added." /> : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dashboard.monthlySlaughterVolume} barCategoryGap="28%">
+              <BarChart data={volumeRows} barCategoryGap="28%">
                 <defs>
                   <linearGradient id="barCow" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#d5ed48" />
@@ -986,7 +989,7 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
             </div>
           </div>
           <div className="h-72">
-            {!hasFees ? <ChartEmptyState title="A clear view of collections" message="Your fee breakdown will appear once payments are recorded." /> : (
+            {!feesComplete ? <ChartEmptyState title="Fee breakdown unavailable/incomplete" message="See recorded subtotals and coverage above; missing amounts are not zero." /> : !hasFees ? <ChartEmptyState title={hasRecordedFees?"Recorded fee totals: PHP 0.00":"No recorded fee data"} message={hasRecordedFees?"All covered fee totals are recorded zero; they are not missing amounts.":"No fee records are available for this report."} /> : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={dashboard.feeBreakdown} dataKey="value" nameKey="name" innerRadius={54} outerRadius={82} paddingAngle={3} strokeWidth={2} isAnimationActive={false}>
@@ -1012,9 +1015,9 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
     vendor_id: string;
     date: string;
     animal_type: 'Cow' | 'Pig' | 'Both';
-    number_of_heads: number;
-    number_of_heads_cow: number;
-    number_of_heads_pig: number;
+    number_of_heads: number | '';
+    number_of_heads_cow: number | '';
+    number_of_heads_pig: number | '';
     livestock_type: string;
     meat_type_to_deliver: string;
     kilograms_cow: string;
@@ -1049,10 +1052,10 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
   });
 
   const openEditRecord = (record: SlaughterRecord) => {
+    const counts=recordedHeads(record);
+    if(!counts.complete){showToast('Historical species/headcounts are incomplete. No correction values were inferred.','error');return;}
     setEditingRecordId(record.id);
-    const total = Number(record.number_of_heads || 0);
-    const cowSplit = (record as any).number_of_heads_cow != null ? Number((record as any).number_of_heads_cow) : splitBothHeads(total).cow;
-    const pigSplit = (record as any).number_of_heads_pig != null ? Number((record as any).number_of_heads_pig) : splitBothHeads(total).pig;
+    const total=counts.total!,cowSplit=counts.Cow!,pigSplit=counts.Pig!;
     setForm({
       vendor_id: record.vendor_id,
       date: record.date,
@@ -1092,7 +1095,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
       const query = search.trim().toLowerCase();
-      const bySearch = !query || `${record.vendor_name || ''} ${record.animal_type} ${record.status} ${record.id}`.toLowerCase().includes(query);
+      const bySearch = !query || `${record.vendor_name || ''} ${speciesText(record.animal_type)} ${record.status} ${record.id}`.toLowerCase().includes(query);
       const byVendor = filters.vendor === 'All' || record.vendor_id === filters.vendor;
       const byAnimal = filters.animal === 'All' || record.animal_type === filters.animal;
       const byStatus = filters.status === 'All' || record.status === filters.status;
@@ -1117,8 +1120,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
 
   const handleAnimalChange = (value: 'Cow' | 'Pig' | 'Both') => {
     if (value === 'Both') {
-      const split = splitBothHeads(Number(form.number_of_heads || 0));
-      setForm({ ...form, animal_type: value, number_of_heads_cow: split.cow, number_of_heads_pig: split.pig });
+      setForm({ ...form, animal_type: value, number_of_heads_cow: '', number_of_heads_pig: '' });
     } else {
       setForm({ ...form, animal_type: value });
     }
@@ -1130,9 +1132,11 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
     setIsSubmitting(true);
     try {
       const isBoth = form.animal_type === 'Both';
+      if(!isBoth && readHeadcount(form.number_of_heads)===null)throw new Error('Enter the recorded headcount; missing is not zero.');
+      if(isBoth && (readHeadcount(form.number_of_heads_cow)===null||readHeadcount(form.number_of_heads_pig)===null))throw new Error('Enter both recorded species counts; missing counts are not zero.');
       const totalHeads = isBoth
-        ? Number(form.number_of_heads_cow || 0) + Number(form.number_of_heads_pig || 0)
-        : Number(form.number_of_heads || 0);
+        ? Number(form.number_of_heads_cow) + Number(form.number_of_heads_pig)
+        : Number(form.number_of_heads);
       if (!form.vendor_id) throw new Error('Please select a vendor.');
       if (!isValidDateString(form.date)) throw new Error('Date must be YYYY-MM-DD.');
       if (isBoth && (!isNonNegativeInput(form.number_of_heads_cow) || !isNonNegativeInput(form.number_of_heads_pig))) {
@@ -1148,8 +1152,8 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
         date: form.date,
         animal_type: form.animal_type,
         number_of_heads: totalHeads,
-        number_of_heads_cow: isBoth ? Number(form.number_of_heads_cow || 0) : undefined,
-        number_of_heads_pig: isBoth ? Number(form.number_of_heads_pig || 0) : undefined,
+        number_of_heads_cow: isBoth ? Number(form.number_of_heads_cow) : undefined,
+        number_of_heads_pig: isBoth ? Number(form.number_of_heads_pig) : undefined,
         livestock_type: form.livestock_type,
         meat_type_to_deliver: form.meat_type_to_deliver,
         kilograms_cow: form.kilograms_cow ? Number(form.kilograms_cow) : null,
@@ -1276,8 +1280,8 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
                   <tr key={record.id} className="table-row">
                     <td className="tnum px-4 py-3">{formatDate(record.date)}</td>
                     <td className="px-4 py-3 font-medium">{record.vendor_name || 'N/A'}</td>
-                    <td className="px-4 py-3">{record.animal_type}</td>
-                    <td className="tnum px-4 py-3 font-semibold">{record.number_of_heads}</td>
+                    <td className="px-4 py-3">{speciesText(record.animal_type)}</td>
+                    <td className="tnum px-4 py-3 font-semibold">{headcountText(record.number_of_heads)}{!recordedHeads(record).complete && <span className="block text-xs">{headcountCoverageText(summarizeHeadcounts([record]))}</span>}</td>
                     <td className="px-4 py-3">{record.livestock_type}</td>
                     <td className="px-4 py-3">{record.meat_type_to_deliver}</td>
                     <td className="tnum px-4 py-3">{record.kilograms_cow ?? '--'}</td>
@@ -1343,21 +1347,21 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
                 <>
                   <div>
                     <label className="label">Cow Heads</label>
-                    <input type="number" min={0} value={form.number_of_heads_cow} onChange={(e) => setForm({ ...form, number_of_heads_cow: Number(e.target.value) })} className="input" required />
+                    <input type="number" min={0} value={form.number_of_heads_cow} onChange={(e) => setForm({ ...form, number_of_heads_cow: e.target.value===''?'':Number(e.target.value) })} className="input" required />
                   </div>
                   <div>
                     <label className="label">Pig Heads</label>
-                    <input type="number" min={0} value={form.number_of_heads_pig} onChange={(e) => setForm({ ...form, number_of_heads_pig: Number(e.target.value) })} className="input" required />
+                    <input type="number" min={0} value={form.number_of_heads_pig} onChange={(e) => setForm({ ...form, number_of_heads_pig: e.target.value===''?'':Number(e.target.value) })} className="input" required />
                   </div>
                   <div>
                     <label className="label">Total Heads</label>
-                    <input value={Number(form.number_of_heads_cow || 0) + Number(form.number_of_heads_pig || 0)} className="input bg-slate-50 dark:bg-slate-800" readOnly />
+                    <input value={headcountText(invoiceHeadcounts(form).total)} className="input bg-slate-50 dark:bg-slate-800" readOnly />
                   </div>
                 </>
               ) : (
               <div>
                 <label className="label">Number of Heads</label>
-                <input type="number" min={1} value={form.number_of_heads} onChange={(e) => setForm({ ...form, number_of_heads: Number(e.target.value) })} className="input" required />
+                <input type="number" min={1} value={form.number_of_heads} onChange={(e) => setForm({ ...form, number_of_heads: e.target.value===''?'':Number(e.target.value) })} className="input" required />
               </div>
               )}
               </div>
@@ -1436,14 +1440,14 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     vendor_id: '',
     slaughter_record_id: '',
     date_issued: todayLocal(),
-    number_of_heads_cow: 0,
-    number_of_heads_pig: 0,
+    number_of_heads_cow: 0 as number | '',
+    number_of_heads_pig: 0 as number | '',
     payment_status: 'Unpaid',
     notes: ''
   });
 
   const filteredInvoices = useMemo(() => {
-    const sorted = [...invoices].sort((a, b) => b.date_issued.localeCompare(a.date_issued));
+    const sorted = [...invoices].sort((a, b) => String(b.date_issued??'').localeCompare(String(a.date_issued??'')));
     return sorted.filter((invoice) => {
       const query = search.trim().toLowerCase();
       const byStatus = filters.status === 'All' || invoice.payment_status === filters.status;
@@ -1462,13 +1466,14 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
   const pagedInvoices = filteredInvoices.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const feeBreakdown = useMemo(() => {
-    const totalHeads = Number(form.number_of_heads_cow || 0) + Number(form.number_of_heads_pig || 0);
+    const cow=readHeadcount(form.number_of_heads_cow),pig=readHeadcount(form.number_of_heads_pig);
+    const totalHeads=cow!==null&&pig!==null?cow+pig:null;
     const [corralRate, deliveryRate, antiRate, facilityRate] = FEE_TYPES.map((t) => getFeeAmount(feeConfig, t.id, t.fallback));
-    const corralFee = totalHeads * corralRate;
-    const deliveryFee = totalHeads * deliveryRate;
-    const antiMortemFee = totalHeads * antiRate;
-    const facilityFee = totalHeads * facilityRate;
-    const total = corralFee + deliveryFee + antiMortemFee + facilityFee;
+    const corralFee = totalHeads===null?null:totalHeads * corralRate;
+    const deliveryFee = totalHeads===null?null:totalHeads * deliveryRate;
+    const antiMortemFee = totalHeads===null?null:totalHeads * antiRate;
+    const facilityFee = totalHeads===null?null:totalHeads * facilityRate;
+    const total = corralFee===null||deliveryFee===null||antiMortemFee===null||facilityFee===null?null:corralFee + deliveryFee + antiMortemFee + facilityFee;
     return { corralFee, deliveryFee, antiMortemFee, facilityFee, total, totalHeads };
   }, [form.number_of_heads_cow, form.number_of_heads_pig, feeConfig]);
 
@@ -1477,8 +1482,8 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const cow = Number(form.number_of_heads_cow || 0);
-      const pig = Number(form.number_of_heads_pig || 0);
+      const cow=readHeadcount(form.number_of_heads_cow),pig=readHeadcount(form.number_of_heads_pig);
+      if(cow===null||pig===null)throw new Error('Enter both recorded headcounts; missing values are not zero.');
       if (!form.vendor_id) throw new Error('Please select a vendor.');
       if (cow + pig <= 0) throw new Error('At least one head is required.');
       await addInvoice({
@@ -1556,8 +1561,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     y += 7;
     pdf.text(`Invoice #: ${invoice.id}`, margin, y);
     y += 7;
-    pdf.text(`Heads - Cow: ${invoice.number_of_heads_cow}   Pig: ${invoice.number_of_heads_pig}`, margin, y);
-    y += 10;
+    for(const line of invoiceHeadcountLines(invoice)){pdf.text(line,margin,y,{maxWidth:180});y+=10;}
     pdf.text(`Corral/Casket Fee: ${formatCurrency(invoice.corral_fee)}`, margin, y);
     y += 7;
     pdf.text(`Delivery Fee: ${formatCurrency(invoice.delivery_fee)}`, margin, y);
@@ -1656,7 +1660,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                     <td className="tnum max-w-32 truncate px-4 py-3 font-medium" title={invoice.id}>{invoice.id}</td>
                     <td className="px-4 py-3 font-medium">{invoice.vendor_name || 'N/A'}</td>
                     <td className="tnum px-4 py-3">{formatDate(invoice.date_issued)}</td>
-                    <td className="tnum px-4 py-3">{Number(invoice.number_of_heads_cow || 0) + Number(invoice.number_of_heads_pig || 0)}</td>
+                    <td className="tnum px-4 py-3">{headcountText(invoiceHeadcounts(invoice).total)}<span className="block text-xs">{invoiceHeadcounts(invoice).coverage}</span></td>
                     <td className="tnum px-4 py-3 font-semibold">{formatCurrency(invoice.total_amount)}</td>
                     <td className="px-4 py-3">
                       <StatusPill status={invoice.payment_status} />
@@ -1715,30 +1719,17 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                   const recId = e.target.value;
                   const rec = slaughterRecords.find((r) => r.id === recId);
                   if (rec) {
-                    const cow = (rec as any).number_of_heads_cow;
-                    const pig = (rec as any).number_of_heads_pig;
-                    if (rec.animal_type === 'Cow') {
-                      setForm({ ...form, slaughter_record_id: recId, vendor_id: rec.vendor_id, date_issued: rec.date, number_of_heads_cow: Number(rec.number_of_heads || 0), number_of_heads_pig: 0 });
-                    } else if (rec.animal_type === 'Pig') {
-                      setForm({ ...form, slaughter_record_id: recId, vendor_id: rec.vendor_id, date_issued: rec.date, number_of_heads_cow: 0, number_of_heads_pig: Number(rec.number_of_heads || 0) });
-                    } else {
-                      // B24: a stored 0/0 (or non-numeric) split is NOT a real
-                      // split — fall back to the even split so the form never
-                      // prefills 0/0, which the backend would reject.
-                      const cowNum = Number(cow);
-                      const pigNum = Number(pig);
-                      const hasSplit =
-                        Number.isFinite(cowNum) && Number.isFinite(pigNum) && cowNum >= 0 && pigNum >= 0 && cowNum + pigNum > 0;
-                      const split = hasSplit ? { cow: cowNum, pig: pigNum } : splitBothHeads(Number(rec.number_of_heads || 0));
-                      setForm({ ...form, slaughter_record_id: recId, vendor_id: rec.vendor_id, date_issued: rec.date, number_of_heads_cow: split.cow, number_of_heads_pig: split.pig });
-                    }
+                    const counts=recordedHeads(rec);
+                    setForm({...form,slaughter_record_id:recId,vendor_id:rec.vendor_id,date_issued:rec.date,
+                      number_of_heads_cow:counts.complete?counts.Cow!:'',number_of_heads_pig:counts.complete?counts.Pig!:''});
+                    if(!counts.complete)showToast('Linked record species/headcounts are unavailable/incomplete. Enter reviewed values; none were inferred.','error');
                   } else {
                     setForm({ ...form, slaughter_record_id: recId });
                   }
                 }} className="input">
                   <option value="">Optional</option>
                   {slaughterRecords.map((record) => (
-                    <option key={record.id} value={record.id}>{record.id} — {record.vendor_name || record.vendor_id} — {formatDate(record.date)} ({record.number_of_heads} heads)</option>
+                    <option key={record.id} value={record.id}>{record.id} — {record.vendor_name || record.vendor_id} — {formatDate(record.date)} ({headcountText(record.number_of_heads)} heads)</option>
                   ))}
                 </select>
               </div>
@@ -1756,12 +1747,12 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
               </div>
               <div>
                 <label className="label">Headcount - Cow</label>
-                <input type="number" min={0} value={form.number_of_heads_cow} onChange={(e) => setForm({ ...form, number_of_heads_cow: Number(e.target.value) })} className="input" required />
+                <input type="number" min={0} value={form.number_of_heads_cow} onChange={(e) => setForm({ ...form, number_of_heads_cow: e.target.value===''?'':Number(e.target.value) })} className="input" required />
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">At least one head total is required.</p>
               </div>
               <div>
                 <label className="label">Headcount - Pig</label>
-                <input type="number" min={0} value={form.number_of_heads_pig} onChange={(e) => setForm({ ...form, number_of_heads_pig: Number(e.target.value) })} className="input" required />
+                <input type="number" min={0} value={form.number_of_heads_pig} onChange={(e) => setForm({ ...form, number_of_heads_pig: e.target.value===''?'':Number(e.target.value) })} className="input" required />
               </div>
               </div>
             </div>
@@ -1769,7 +1760,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
             <div className="form-section">
               <p className="form-section-title">Charges & notes</p>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-              <h4 className="mb-3 font-semibold">Fee breakdown ({feeBreakdown.totalHeads} head(s))</h4>
+              <h4 className="mb-3 font-semibold">Fee breakdown ({headcountText(feeBreakdown.totalHeads)} head(s))</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span>Corral/Casket Fee</span><strong className="tnum">{formatCurrency(feeBreakdown.corralFee)}</strong></div>
                 <div className="flex justify-between"><span>Delivery Fee</span><strong className="tnum">{formatCurrency(feeBreakdown.deliveryFee)}</strong></div>
@@ -1807,9 +1798,10 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                 <div><span className="text-slate-500 dark:text-slate-400">Invoice No.:</span> <strong>{selectedInvoice.id}</strong></div>
                 <div><span className="text-slate-500 dark:text-slate-400">Date:</span> <strong>{formatDate(selectedInvoice.date_issued)}</strong></div>
                 <div><span className="text-slate-500 dark:text-slate-400">Due Date:</span> <strong>{formatDate(selectedInvoice.due_date)}</strong></div>
-                <div><span className="text-slate-500 dark:text-slate-400">Cow Heads:</span> <strong>{selectedInvoice.number_of_heads_cow}</strong></div>
-                <div><span className="text-slate-500 dark:text-slate-400">Pig Heads:</span> <strong>{selectedInvoice.number_of_heads_pig}</strong></div>
+                <div><span className="text-slate-500 dark:text-slate-400">Cow Heads:</span> <strong>{headcountText(selectedInvoice.number_of_heads_cow)}</strong></div>
+                <div><span className="text-slate-500 dark:text-slate-400">Pig Heads:</span> <strong>{headcountText(selectedInvoice.number_of_heads_pig)}</strong></div>
               </div>
+              <p>{invoiceHeadcounts(selectedInvoice).coverage}</p>
               <div className="mt-6 space-y-2 text-sm">
                 <div className="flex justify-between"><span>Corral/Casket Fee</span><strong>{formatCurrency(selectedInvoice.corral_fee)}</strong></div>
                 <div className="flex justify-between"><span>Delivery Fee</span><strong>{formatCurrency(selectedInvoice.delivery_fee)}</strong></div>
@@ -1851,58 +1843,32 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
 
 function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: DashboardData | null; recordings: SlaughterRecord[]; invoices: Invoice[] }) {
   const { motionEnabled } = useWorkspaceMotion();
-  if (!dashboard) return <LoadingDashboard />;
 
-  const revenueTrend = useMemo(() => {
-    const base = currentMonthKey();
-    return Array.from({ length: 6 }, (_, index) => {
-      const key = shiftMonthKey(base, index - 5);
-      const monthlyTotal = invoices
-        .filter((invoice) => monthKeyOf(invoice.date_issued) === key)
-        .reduce((sum, item) => sum + Number(item.total_amount || 0), 0);
-      return { month: monthLabelForKey(key), revenue: monthlyTotal };
-    });
-  }, [invoices]);
-
-  const volumeComparison = useMemo(() => {
-    const base = currentMonthKey();
-    return Array.from({ length: 6 }, (_, index) => {
-      const key = shiftMonthKey(base, index - 5);
-      let cow = 0;
-      let pig = 0;
-      recordings.forEach((record) => {
-        if (monthKeyOf(record.date) !== key) return;
-        const heads = Number(record.number_of_heads || 0);
-        const cowSplit = Number((record as any).number_of_heads_cow ?? NaN);
-        const pigSplit = Number((record as any).number_of_heads_pig ?? NaN);
-        if (record.animal_type === 'Cow') cow += heads;
-        else if (record.animal_type === 'Pig') pig += heads;
-        else if (Number.isFinite(cowSplit) && Number.isFinite(pigSplit)) {
-          cow += cowSplit;
-          pig += pigSplit;
-        } else {
-          const split = splitBothHeads(heads);
-          cow += split.cow;
-          pig += split.pig;
-        }
-      });
-      return { month: monthLabelForKey(key), Cow: cow, Pig: pig };
-    });
-  }, [recordings]);
-
+  const volumeComparison = useMemo(() => Array.from({length:6},(_,index)=>{
+    const key=shiftMonthKey(currentMonthKey(),index-5);
+    const coverage=summarizeHeadcounts(recordings.filter(row=>validDay(row.date)&&row.date.slice(0,7)===key),recordings.filter(row=>!validDay(row.date)).length);
+    return {month:monthLabelForKey(key),Cow:coverage.Cow,Pig:coverage.Pig,coverage};
+  }),[recordings]);
+  const revenueTrend = useMemo(() => Array.from({length:6},(_,index)=>{
+    const key=shiftMonthKey(currentMonthKey(),index-5);
+    const coverage=summarizeAmounts(invoices.filter(row=>validDay(row.date_issued)&&row.date_issued.slice(0,7)===key),'total_amount',invoices.filter(row=>!validDay(row.date_issued)).length);
+    return {month:monthLabelForKey(key),revenue:coverage.value,coverage};
+  }),[invoices]);
+  const vendorCoverage=useMemo(()=>summarizeHeadcounts(recordings),[recordings]);
   const topVendors = useMemo(() => {
-    const map = new Map<string, number>();
-    recordings.forEach((record) => {
-      map.set(record.vendor_name || 'Unknown', (map.get(record.vendor_name || 'Unknown') || 0) + Number(record.number_of_heads || 0));
-    });
-    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, value]) => ({ name, volume: value }));
-  }, [recordings]);
+    const groups=new Map<string,SlaughterRecord[]>();
+    for(const row of recordings){const name=row.vendor_name||'Unknown Vendor';groups.set(name,[...(groups.get(name)||[]),row]);}
+    return [...groups].map(([name,rows])=>({name,volume:summarizeHeadcounts(rows).totalHeads})).sort((a,b)=>(b.volume??0)-(a.volume??0)).slice(0,5);
+  },[recordings]);
+
+  if (!dashboard) return <LoadingDashboard />;
 
   return (
     <div className="page-enter space-y-6">
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="card p-4 md:p-6">
           <h3 className="mb-4 text-lg font-bold">Monthly revenue</h3>
+          {revenueTrend.filter(row=>!row.coverage.complete).map(row=><p key={row.month} role="status">{row.month}: {amountCoverageText(row.coverage)}</p>)}
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={revenueTrend}>
@@ -1918,6 +1884,7 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
 
         <div className="card p-4 md:p-6">
           <h3 className="mb-4 text-lg font-bold">Cow vs Pig slaughter volume</h3>
+          {volumeComparison.filter(row=>!row.coverage.speciesComplete).map(row=><p key={row.month} role="status" className="text-sm">{row.month}: {headcountCoverageText(row.coverage)} Unavailable values appear as gaps.</p>)}
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={volumeComparison}>
@@ -1937,8 +1904,10 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
       <div className="grid gap-6 xl:grid-cols-2">
         <div className="card p-4 md:p-6">
           <h3 className="mb-4 text-lg font-bold">Fee type breakdown</h3>
+          {dashboard.feeBreakdown.length>0 && dashboard.feeBreakdown.every(fee=>fee.value===0) && <p>{dashboard.feeBreakdown.some(fee=>(fee.coverage?.records??0)>0)?'Recorded fee totals: PHP 0.00 (complete recorded zeros).':'No recorded fee data.'}</p>}
+          {dashboard.feeBreakdown.some(fee=>readAmount(fee.value)===null) && <p role="status">Fee breakdown unavailable/incomplete. {dashboard.feeBreakdown.map(fee=>`${fee.name}: ${formatCurrency(fee.value)}${fee.coverage?' — '+amountCoverageText(fee.coverage):''}`).join(' ')}</p>}
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            {dashboard.feeBreakdown.every(fee=>readAmount(fee.value)!==null) && dashboard.feeBreakdown.some(fee=>(fee.value??0)>0) && (<ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={dashboard.feeBreakdown} dataKey="value" innerRadius={52} outerRadius={90} isAnimationActive={motionEnabled} animationDuration={650}>
                   {dashboard.feeBreakdown.map((entry, index) => (
@@ -1948,13 +1917,13 @@ function StatisticsPage({ dashboard, recordings, invoices }: { dashboard: Dashbo
                 <Tooltip formatter={(value: number) => formatCurrency(value)} />
                 <Legend />
               </PieChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer>)}
           </div>
         </div>
 
         <div className="card p-4 md:p-6">
           <h3 className="mb-4 text-lg font-bold">Top 5 vendors by volume</h3>
-          {topVendors.length === 0 ? (
+          {!vendorCoverage.totalComplete ? (<p role="status">Vendor ranking unavailable/incomplete. {headcountCoverageText(vendorCoverage)}</p>) : topVendors.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">No vendor volume yet.</p>
           ) : (
           <div className="space-y-3">

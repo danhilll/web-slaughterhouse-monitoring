@@ -1,3 +1,4 @@
+import type {HeadcountCoverage,AmountCoverage} from '../shared/reporting.js';
 export type AnimalType = 'Cow' | 'Pig' | 'Both';
 export type PaymentStatus = 'Paid' | 'Unpaid' | 'Overdue';
 export type NotificationType = 'info' | 'warning' | 'alert';
@@ -66,16 +67,19 @@ export type FeeConfig = {
 
 export type DashboardData = {
   recordBasis?: string;
+  headcountCoverage?: HeadcountCoverage;
+  revenueCoverage?: AmountCoverage;
+  recordDateCoverage?: {undatedRecords:number;knownRecordsToday:number;knownRecordsThisMonth:number};
   summary: {
     totalVendors: number;
-    totalRecordsToday: number;
-    totalRecordsThisMonth: number;
-    totalRevenueThisMonth: number;
+    totalRecordsToday: number | null;
+    totalRecordsThisMonth: number | null;
+    totalRevenueThisMonth: number | null;
     unpaidInvoicesCount: number;
   };
   recentSlaughterRecords: SlaughterRecord[];
   recentInvoices: Invoice[];
-  monthlySlaughterVolume: { month: string; Cow: number; Pig: number }[];
-  feeBreakdown: { name: string; value: number }[];
+  monthlySlaughterVolume: { month: string; Cow: number | null; Pig: number | null; coverage?:HeadcountCoverage }[];
+  feeBreakdown: { name: string; value: number | null; coverage?:AmountCoverage }[];
   municipality: string;
 };

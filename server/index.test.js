@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {summarizeHeadcounts,summarizeAmounts,validDay} from '../shared/reporting.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -15,7 +16,7 @@ test('startup wiring evaluates operations gates against the initialized project 
   };
   const principal = { uid: 'synthetic-admin', role: 'admin', municipalScopeId: 'ph-quezon-calauag', staffPermissions: [] };
   const context = {
-    app, express, routerConfig: () => ({}), process: { env }, firestoreDb: null, firebaseAuth: null, WEB_ADMIN_UIDS: new Set(),
+    app, express, production: null, routerConfig: () => ({}), process: { env }, firestoreDb: null, firebaseAuth: null, WEB_ADMIN_UIDS: new Set(),
     createAnimalStore: () => ({}),
     createOperationsStore: () => ({ schedule: async () => null, list: async () => [] }),
     createAnimalMobileAuth: () => (req, res, next) => { req.animalUser = principal; next(); },
@@ -124,4 +125,35 @@ test('invoice create and edit reject oversized, negative and fractional counts b
       }
     }
   }
+});
+
+test('invoice detail uses scoped point lookups without loading a vendor register',async()=>{
+  const source=readFileSync(new URL('./index.js',import.meta.url),'utf8');
+  const begin=source.indexOf("app.get('/api/invoices/:id'");
+  const end=source.indexOf('// Due-date policy',begin);
+  let handler,answer;const calls=[];
+  runInNewContext(source.slice(begin,end),{
+    app:{get:(_path,fn)=>handler=fn},asyncHandler:fn=>fn,MUNICIPALITY:'Synthetic',
+    store:{
+      getInvoice:async id=>{calls.push(['invoice',id]);return {id,vendor_id:'VEN-A'};},
+      getVendor:async id=>{calls.push(['vendor',id]);return {id,name:'Scoped vendor'};},
+      listVendors:async()=>{throw Error('Full-register join must not run');}
+    }
+  });
+  await handler({params:{id:'INV-A'}},{json:body=>answer=body});
+  assert.deepEqual(calls,[['invoice','INV-A'],['vendor','VEN-A']]);assert.equal(answer.vendor.name,'Scoped vendor');
+});
+
+test('legacy dashboard uses the same explicit coverage rules as scoped production reports',async()=>{
+  const source=readFileSync(new URL('./index.js',import.meta.url),'utf8');
+  const begin=source.indexOf('const buildDashboard =');
+  const records=[{id:'A',date:'2026-10-15',number_of_heads:3},{id:'B',date:'2026-10-15',animal_type:'Cow',number_of_heads:0},{id:'C',date:'2026-10-15',animal_type:'Pig'}];
+  const result=await runInNewContext(source.slice(begin,source.indexOf('const asyncHandler',begin))+'\nbuildDashboard()',{
+    production:null,MUNICIPALITY:'Synthetic',summarizeHeadcounts,summarizeAmounts,validDay,
+    store:{listVendors:async()=>[],listRecords:async()=>records,listInvoices:async()=>[],listFees:async()=>[]},
+    withVendor:()=>row=>row,manilaDateString:()=> '2026-10-15',manilaMonthKey:()=> '2026-10',shiftMonthKey:()=> '2026-10',monthLabelForKey:()=> 'Oct'
+  });
+  assert.equal(result.headcountCoverage.knownHeads,3);assert.equal(result.headcountCoverage.totalHeads,null);
+  assert.equal(result.monthlySlaughterVolume[0].Cow,null);assert.equal(result.monthlySlaughterVolume[0].coverage.speciesCovered,1);
+  assert.equal(result.summary.totalRecordsToday,3);
 });
