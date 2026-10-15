@@ -38,6 +38,33 @@ test('revoked or invalid token is rejected', async () => {
   assert.equal(res.statusCode, 401);
 });
 
+test('known credential rejections return 401 without SDK details', async () => {
+  for (const code of ['auth/argument-error', 'auth/invalid-id-token', 'auth/id-token-expired',
+    'auth/id-token-revoked', 'auth/user-disabled', 'auth/user-not-found']) {
+    const res = response();
+    const middleware = createWebAdminMiddleware(() => ({ verifyIdToken: async (_token, checkRevoked) => {
+      assert.equal(checkRevoked, true);
+      throw Object.assign(new Error('Private SDK detail'), { code });
+    } }), new Set(['admin']));
+    await middleware({ headers: { authorization: 'Bearer token' } }, res, () => assert.fail('must not continue'));
+    assert.equal(res.statusCode, 401, code);
+    assert.deepEqual(res.body, { message: 'Your session is invalid or expired. Please sign in again.' });
+  }
+});
+
+test('service, permission and unknown verification failures return safe 503 responses', async () => {
+  for (const code of ['auth/internal-error', 'auth/insufficient-permission', 'auth/invalid-credential',
+    'auth/project-not-found', 'auth/too-many-requests', 'auth/future-error', 'app/network-error', 'ETIMEDOUT', undefined]) {
+    const res = response();
+    const middleware = createWebAdminMiddleware(() => ({ verifyIdToken: async () => {
+      throw Object.assign(new Error('Private SDK detail'), { code, status: 401 });
+    } }), new Set(['admin']));
+    await middleware({ headers: { authorization: 'Bearer token' } }, res, () => assert.fail('must not continue'));
+    assert.equal(res.statusCode, 503, code);
+    assert.deepEqual(res.body, { message: 'Authentication is unavailable.' });
+  }
+});
+
 test('allowlisted admin reaches API with a verified identity', async () => {
   const res = response();
   const req = { headers: { authorization: 'Bearer token' } };

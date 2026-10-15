@@ -38,6 +38,7 @@ async function fixture(t, change = () => {}) {
   change(state);
   const auth = { verifyIdToken: async (token, revoked) => {
     assert.equal(revoked, true);
+    if (state.verificationFailure) throw state.verificationFailure;
     if (['disabled', 'revoked', 'expired', 'wrong-project'].includes(token)) {
       throw { code: token === 'disabled' ? 'auth/user-disabled' : 'auth/id-token-revoked' };
     }
@@ -72,6 +73,29 @@ async function fixture(t, change = () => {}) {
     return { status: response.status, body, cache: response.headers.get('cache-control') };
   } };
 }
+
+test('mobile credential rejection stays 401; backend and unknown verifier failures are safe 503', async t => {
+  const { state, request } = await fixture(t);
+  for (const code of ['auth/argument-error', 'auth/invalid-id-token', 'auth/id-token-expired',
+    'auth/id-token-revoked', 'auth/user-disabled', 'auth/user-not-found',
+    'auth/internal-error', 'auth/insufficient-permission', 'auth/invalid-credential',
+    'auth/future-error', 'ETIMEDOUT', undefined]) {
+    state.verificationFailure = Object.assign(new Error('Private SDK detail'), { code });
+    const rejected = ['auth/argument-error', 'auth/invalid-id-token', 'auth/id-token-expired',
+      'auth/id-token-revoked', 'auth/user-disabled', 'auth/user-not-found'].includes(code);
+    for (const path of ['/api/mobile/me', '/api/mobile/invoices']) {
+      const result = await request(path);
+      assert.equal(result.status, rejected ? 401 : 503, code);
+      assert.equal(result.cache, 'no-store');
+      assert.deepEqual(result.body, rejected
+        ? { code: 'invalid_session', message: 'Your session is invalid or expired.' }
+        : { code: 'unavailable', message: 'Mobile access is unavailable.' });
+    }
+  }
+  state.verificationFailure = null;
+  assert.equal((await request('/api/mobile/me')).status, 200);
+  assert.equal(state.writes, 0);
+});
 
 test('real HTTP handlers expose own canonical profile and bounded scoped invoice pages', async (t) => {
   const { request, state } = await fixture(t);
@@ -169,6 +193,21 @@ test('untrusted store results and malformed canonical fields are never returned'
     { ...invoice('INV-X'), due_date: '2026-02-30' }]) {
     store.listInvoices = async () => [row];
     assert.equal((await request('/api/mobile/invoices')).status, 503);
+  }
+});
+
+test('mobile invoice headcounts accept Android Int bounds and reject incompatible records unchanged', async t => {
+  const { request, state } = await fixture(t);
+  for (const field of ['number_of_heads_cow', 'number_of_heads_pig']) {
+    for (const count of [0, 2147483647, 2147483648, -1, 0.5]) {
+      state.invoices = [{ ...invoice('INV-BOUNDARY'), [field]: count }];
+      const before = structuredClone(state.invoices);
+      const result = await request('/api/mobile/invoices');
+      assert.equal(result.status, count === 0 || count === 2147483647 ? 200 : 503);
+      if (result.status === 200) assert.equal(result.body.items[0][field], count);
+      else assert.equal(result.body.code, 'unavailable');
+      assert.deepEqual(state.invoices, before);
+    }
   }
 });
 

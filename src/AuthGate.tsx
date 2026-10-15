@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { onIdTokenChanged, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth';
 import App from './App';
 import { apiFetch, WEB_ACCESS_LOST_EVENT } from './api';
@@ -51,13 +51,13 @@ export default function AuthGate() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [retryCount, setRetryCount] = useState(0);
+  const requestId = useRef(0);
 
   useEffect(() => {
     if (!auth) return;
     let active = true;
-    let requestId = 0;
     const handleAccessLost = (event: Event) => {
-      requestId += 1;
+      requestId.current += 1;
       setSession(null);
       setLoading(false);
       setError((event as CustomEvent<number>).detail === 401
@@ -66,31 +66,39 @@ export default function AuthGate() {
     };
     window.addEventListener(WEB_ACCESS_LOST_EVENT, handleAccessLost);
     const unsubscribe = onIdTokenChanged(auth, async (user) => {
-      const currentRequest = ++requestId;
       if (!active) return;
+      const currentRequest = ++requestId.current;
       setAuthUser(user);
-      setSession(null);
+      // A refresh may keep only this user's already established session.
+      setSession(current => user && current?.uid === user.uid ? current : null);
       setLoading(true);
       setError('');
       if (!user) {
         setLoading(false);
         return;
       }
+      const isCurrent = () => active && currentRequest === requestId.current && auth?.currentUser?.uid === user.uid;
+      let retryable = true; // No response: a network/token-fetch failure cannot grant new access.
       try {
         const response = await apiFetch('/api/session');
+        if (!isCurrent()) return;
+        retryable = response.status === 503;
         if (!response.ok) throw new Error(await sessionError(response));
         const nextSession = await response.json() as WebSession;
-        if (active && currentRequest === requestId) setSession(nextSession);
+        if (nextSession.uid !== user.uid || nextSession.role !== 'admin') throw new Error('Unable to verify web access.');
+        if (isCurrent()) setSession(nextSession);
       } catch (reason) {
-        if (active && currentRequest === requestId) {
+        if (isCurrent()) {
+          if (!retryable) setSession(null);
           setError(reason instanceof Error ? reason.message : 'Unable to verify web access.');
         }
       } finally {
-        if (active && currentRequest === requestId) setLoading(false);
+        if (isCurrent()) setLoading(false);
       }
     });
     return () => {
       active = false;
+      requestId.current += 1;
       unsubscribe();
       window.removeEventListener(WEB_ACCESS_LOST_EVENT, handleAccessLost);
     };
@@ -139,10 +147,24 @@ export default function AuthGate() {
   };
 
   const handleSignOut = async () => {
+    requestId.current += 1;
+    setSession(null);
+    setAuthUser(null);
+    setLoading(false);
+    setError('');
     if (auth) await signOut(auth);
   };
 
-  if (session) return <App session={session} onLogout={handleSignOut} />;
+  if (session) return <>
+    {(loading || error) && <div role={error ? 'alert' : 'status'} className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      <p>{loading ? 'Rechecking access.' : 'Access check unavailable.'} Your existing session has not been reverified.</p>
+      {error && <p>{error}</p>}
+      <button type="button" disabled={loading} onClick={() => setRetryCount(count => count + 1)} className="btn-secondary mt-2">
+        {loading ? 'Checking access…' : 'Retry access check'}
+      </button>
+    </div>}
+    <App key={session.uid} session={session} onLogout={handleSignOut} />
+  </>;
 
   return (
     <main className="auth-page">

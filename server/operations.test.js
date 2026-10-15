@@ -107,6 +107,38 @@ test('server prices a single approved revision and prevents concurrent duplicate
   assert.equal(rows.get('animal_records/ANM-A').billingInvoiceId,inv.id);assert.equal([...rows.keys()].filter(k=>k.startsWith('invoices/')).length,1);
   assert.equal((await call('/eligible')).body.items.length,1);
 });
+for(const [at,issueDate,previousDate] of [
+  ['2026-10-14T15:59:59.999Z','2026-10-14','2026-10-13'],
+  ['2026-10-14T16:00:00.000Z','2026-10-15','2026-10-14'],
+  ['2026-10-14T16:00:00.001Z','2026-10-15','2026-10-14'],
+  ['2026-12-31T16:00:00.000Z','2027-01-01','2026-12-31']
+])test(`billing uses Manila calendar dates at ${at} and preserves UTC audit timestamps`,async t=>{
+  const {call,rows}=await fixture(t,true,()=>at);
+  const before=structuredClone(rows);
+  const rejected=await call('/animals/ANM-A/invoice','billing',{...bill,dueDate:previousDate});
+  assert.equal(rejected.status,400);
+  assert.deepEqual(rows,before,'Rejected due dates must not write any records');
+  const accepted=await call('/animals/ANM-A/invoice','billing',{...bill,dueDate:issueDate});
+  assert.equal(accepted.status,201);
+  assert.equal(accepted.body.date_issued,issueDate);
+  assert.equal(accepted.body.due_date,issueDate);
+  assert.equal(accepted.body.total_amount,95);
+  assert.equal(rows.get(`invoices/${accepted.body.id}`).createdAt,at);
+  assert.equal(rows.get('animal_records/ANM-A').updatedAt,at);
+  const audit=[...rows].find(([key])=>key.startsWith('operation_audit/'))[1];
+  assert.equal(audit.at,at);
+  assert.equal(audit.after.date_issued,issueDate);
+});
+test('billing validates and issues against one instant when the clock crosses Manila midnight',async t=>{
+  let calls=0;
+  const beforeMidnight='2026-10-14T15:59:59.999Z';
+  const {call,rows}=await fixture(t,true,()=>calls++===0?beforeMidnight:'2026-10-14T16:00:00.000Z');
+  const result=await call('/animals/ANM-A/invoice','billing',{...bill,dueDate:'2026-10-14'});
+  assert.equal(result.status,201);
+  assert.equal(calls,1);
+  assert.equal(result.body.date_issued,'2026-10-14');
+  assert.equal(rows.get(`invoices/${result.body.id}`).createdAt,beforeMidnight);
+});
 test('pending stale cross-scope or inactive-vendor animals cannot be billed',async t=>{
   const {call,rows}=await fixture(t);const a=rows.get('animal_records/ANM-A');
   a.inspection.status='pending';assert.equal((await call('/animals/ANM-A/invoice','billing',bill)).status,409);
@@ -129,6 +161,24 @@ test('vendor invoice reads stay scoped and private storage fields are not projec
   assert.equal((await call(`/invoices/${inv.id}`,'other')).status,404);assert.ok(!('totalCents' in inv));assert.ok(!('createdBy' in inv));
   await call(`/invoices/${inv.id}/payment`,'billing',payment(1));rows.get(`invoices/${inv.id}`).payment.privateContact='PRIVATE';
   assert.ok(!JSON.stringify((await call(`/invoices/${inv.id}`,'alice')).body).includes('PRIVATE'));
+});
+test('operations invoice headcounts use Android Int bounds without repairing stored records',async t=>{
+  const {call,rows}=await fixture(t);
+  const inv=(await call('/animals/ANM-A/invoice','billing',bill)).body;
+  const original=structuredClone(rows.get(`invoices/${inv.id}`));
+  for(const field of ['number_of_heads_cow','number_of_heads_pig']){
+    for(const count of [0,2147483647,2147483648,-1,0.5]){
+      rows.set(`invoices/${inv.id}`,{...original,[field]:count});
+      const before=structuredClone(rows);
+      const valid=count===0||count===2147483647;
+      const result=await call(`/invoices/${inv.id}`,'alice');
+      assert.equal(result.status,valid?200:503);
+      assert.equal((await call('/invoices','alice')).status,valid?200:503);
+      if(valid)assert.equal(result.body[field],count);
+      else assert.equal((await call(`/invoices/${inv.id}/payment`,'billing',payment(1))).status,503);
+      assert.deepEqual(rows,before);
+    }
+  }
 });
 test('full payment is transactional, references are unique and stale or duplicate recording fails',async t=>{
   const {call}=await fixture(t);const a=(await call('/animals/ANM-A/invoice','billing',bill)).body,b=(await call('/animals/ANM-B/invoice','billing',bill)).body;

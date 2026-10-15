@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
+import { verifyFirebaseIdToken } from './access.js';
+import { isValidHeadcount } from './headcounts.js';
 
 const ROLES = new Set(['vendor', 'staff', 'inspector']);
 const PAYMENT_STATUSES = new Set(['Paid', 'Unpaid', 'Overdue']);
@@ -60,7 +62,7 @@ function invoiceView(invoice, principal) {
   if (!identifier(invoice.id) || invoice.vendor_id !== principal.vendorBusinessId ||
       invoice.municipalScopeId !== principal.municipalScopeId ||
       !PAYMENT_STATUSES.has(invoice.payment_status) || !date(invoice.date_issued) || !date(invoice.due_date) ||
-      !['number_of_heads_cow', 'number_of_heads_pig'].every((key) => Number.isSafeInteger(invoice[key]) && invoice[key] >= 0) ||
+      !['number_of_heads_cow', 'number_of_heads_pig'].every((key) => isValidHeadcount(invoice[key])) ||
       !['corral_fee', 'delivery_fee', 'anti_mortem_fee', 'facility_fee', 'total_amount'].every((key) => amount(invoice[key])) ||
       !(invoice.slaughter_record_id === null || identifier(invoice.slaughter_record_id)) ||
       !['notes', 'vendor_name'].every((key) => invoice[key] === undefined || string(invoice[key]))) {
@@ -111,7 +113,7 @@ export function createMobileRouter({ getAuth, store, cursorSecret = randomBytes(
       const auth = getAuth();
       if (!auth) return error(res, 503, 'unavailable', 'Mobile authentication is unavailable.');
       // checkRevoked also rejects disabled users; project/audience validation is handled by Admin Auth.
-      const token = await auth.verifyIdToken(match[1], true);
+      const token = await verifyFirebaseIdToken(auth, match[1]);
       if (!identifier(token.uid)) return error(res, 401, 'invalid_session', 'Your session is invalid.');
       const membership = await store.getMembership(token.uid);
       if (!membership || !ROLES.has(membership.role) || membership.status !== 'active' ||
@@ -135,7 +137,7 @@ export function createMobileRouter({ getAuth, store, cursorSecret = randomBytes(
       req.mobileUser = principal;
       next();
     } catch (failure) {
-      if (failure?.code?.startsWith('auth/')) return error(res, 401, 'invalid_session', 'Your session is invalid or expired.');
+      if (failure?.status === 401) return error(res, 401, 'invalid_session', 'Your session is invalid or expired.');
       return error(res, 503, 'unavailable', 'Mobile access is unavailable.');
     }
   });

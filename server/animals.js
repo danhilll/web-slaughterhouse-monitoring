@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
+import { verifyFirebaseIdToken } from './access.js';
 
 export const STAFF_PERMISSIONS = ['inventory', 'billing', 'delivery'];
 const validId = v => typeof v === 'string' && v.length > 0 && v.length <= 128 && v === v.trim() && !v.includes('/') && !['.', '..'].includes(v);
@@ -84,7 +85,7 @@ export function createAnimalMobileAuth(getAuth,store) {
     if(!token)return res.status(401).json({message:'Sign in is required.'});
     try {
       const auth=getAuth();if(!auth)throw fail(503,'Authentication is unavailable.');
-      const decoded=await auth.verifyIdToken(token[1],true);
+      const decoded=await verifyFirebaseIdToken(auth,token[1]);
       const m=await store.membership(decoded.uid);
       if(!m || m.status!=='active' || !['vendor','staff','inspector'].includes(m.role) || !validId(m.municipalScopeId) || decoded.municipalRole!==m.role || decoded.municipalScopeId!==m.municipalScopeId)throw fail(403,'Approved animal workflow access is required.');
       const permissions=m.staffPermissions??[];
@@ -95,7 +96,7 @@ export function createAnimalMobileAuth(getAuth,store) {
         const v=await store.vendor(m.vendorBusinessId);if(!v||v.status!=='Active'||v.municipalScopeId!==m.municipalScopeId)throw fail(403,'Vendor assignment is unavailable.');
       }
       req.animalUser={uid:decoded.uid,role:m.role,municipalScopeId:m.municipalScopeId,staffPermissions:permissions,...(m.role==='vendor'?{vendorBusinessId:m.vendorBusinessId}:{})};next();
-    }catch(e){res.status(e.code?.startsWith('auth/')?401:e.status||503).json({message:e.status?e.message:'Animal access is unavailable.'});}
+    }catch(e){res.status(e.status||503).json({message:e.status&&e.status!==401?e.message:'Animal access is unavailable.'});}
   };
 }
 

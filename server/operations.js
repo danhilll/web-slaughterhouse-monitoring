@@ -2,12 +2,17 @@ import { Router } from 'express';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
 import { createTrackingStore } from './tracking.js';
+import { isValidHeadcount } from './headcounts.js';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const id = value => typeof value === 'string' && value === value.trim() && value.length > 0 && value.length <= 128 && !value.includes('/') && !['.', '..'].includes(value);
 const text = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max && !/[\u0000-\u001f\u007f]/.test(value);
 const money = value => Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000_000;
 const day = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+const municipalDate = at => {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(at));
+  return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type).value).join('-');
+};
 const permission = (p, name) => p.role === 'admin' || p.role === 'staff' && p.staffPermissions.includes(name);
 const scopeRead = (row, p) => row?.municipalScopeId === p.municipalScopeId && (p.role !== 'vendor' || row.vendor_id === p.vendorBusinessId);
 const invoiceKeys = ['id','vendor_id','vendor_name','municipalScopeId','slaughter_record_id','date_issued','due_date','number_of_heads_cow','number_of_heads_pig','corral_fee','delivery_fee','anti_mortem_fee','facility_fee','total_amount','payment_status','animalId','animalRevision','animalIdentifier','revision','feeScheduleVersion','syntheticOnly','payment','delivery'];
@@ -19,6 +24,7 @@ export const operationInvoiceView = row => {
   return result;
 };
 const validInvoice = row => id(row?.id) && row.workflow==='animal' && id(row.vendor_id) && id(row.animalId) && id(row.municipalScopeId) && Number.isSafeInteger(row.animalRevision) && row.animalRevision>0 && Number.isSafeInteger(row.revision) && row.revision > 0 && money(row.totalCents) && row.totalCents > 0 && ['Unpaid','Paid'].includes(row.payment_status) && day(row.date_issued) && day(row.due_date) &&
+  ['number_of_heads_cow','number_of_heads_pig'].every(key=>isValidHeadcount(row[key])) &&
   ['corral_fee','delivery_fee','anti_mortem_fee','facility_fee','total_amount'].every(key=>typeof row[key]==='number'&&Number.isFinite(row[key])&&row[key]>=0) && row.total_amount===row.totalCents/100 &&
   Math.round((row.corral_fee+row.delivery_fee+row.anti_mortem_fee+row.facility_fee)*100)===row.totalCents &&
   (row.payment_status==='Paid'?row.payment?.amountCents===row.totalCents&&text(row.payment.receiptReference,80)&&['cash','bank_transfer'].includes(row.payment.method):!row.payment);
@@ -66,7 +72,7 @@ export function createOperationsStore(getDb) {
         const fees=scheduleView(feeSnap.exists?feeSnap.data():null);
         if(fees.version!==b.feeScheduleVersion)throw fail(409,'The fee schedule changed. Refresh before issuing an invoice.');
         const totalCents=fees.corralCents+fees.deliveryCents+fees.inspectionCents+fees.facilityCents;
-        const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:at.slice(0,10),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
+        const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:municipalDate(at),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
         tx.create(invoice(invoiceId),row);
         tx.update(db().doc(`animal_records/${animalId}`),{billingInvoiceId:invoiceId,updatedAt:at,updatedBy:p.uid});
         audited(tx,p,row,'invoice_issued',at); return row;
@@ -179,8 +185,9 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
   router.post('/animals/:id/invoice',run(async(req,res)=>{
     if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');
     const b=body(req,['expectedRevision','feeScheduleVersion','dueDate']);
-    if(!Number.isSafeInteger(b.feeScheduleVersion)||b.feeScheduleVersion<1||!day(b.dueDate)||b.dueDate<now().slice(0,10))throw fail(400,'Use the displayed fee schedule and a valid due date.');
-    res.status(201).json(operationInvoiceView(await store.bill(req.params.id,b,req.principal,now())));
+    const at=now();
+    if(!Number.isSafeInteger(b.feeScheduleVersion)||b.feeScheduleVersion<1||!day(b.dueDate)||b.dueDate<municipalDate(at))throw fail(400,'Use the displayed fee schedule and a valid due date.');
+    res.status(201).json(operationInvoiceView(await store.bill(req.params.id,b,req.principal,at)));
   }));
   router.post('/invoices/:id/payment',run(async(req,res)=>{
     if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');

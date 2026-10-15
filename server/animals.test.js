@@ -25,7 +25,7 @@ async function fixture(t,enabled=true){
     history:async()=>state.events
   };
   state.claimOverrides={};
-  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:state.memberships[token]?.role,municipalScopeId:state.memberships[token]?.municipalScopeId,...state.claimOverrides[token]};}};
+  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(state.verificationFailure)throw state.verificationFailure;if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:state.memberships[token]?.role,municipalScopeId:state.memberships[token]?.municipalScopeId,...state.claimOverrides[token]};}};
   const app=express();
   app.use('/api/mobile/animals',express.json(),createAnimalMobileAuth(()=>auth,store),createAnimalRouter({store,enabled,getPrincipal:req=>req.animalUser,cursorSecret:Buffer.alloc(32,1)}));
   app.use('/api',createWebAdminMiddleware(()=>auth,new Set(['ADMIN'])));
@@ -35,6 +35,22 @@ async function fixture(t,enabled=true){
   const call=async(path='',token='inventory',method='GET',body,web=false)=>{const response=await fetch(`http://127.0.0.1:${server.address().port}${path==='/invoices'?'/api/invoices':`/api/${web?'animals':'mobile/animals'}${path}`}`,{method,headers:{...(token?{Authorization:`Bearer ${token}`} : {}),'Content-Type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})});return {status:response.status,body:await response.json()};};
   return {state,call};
 }
+test('animal auth distinguishes rejected credentials from backend and unknown failures',async t=>{
+  const {call,state}=await fixture(t);
+  for(const code of ['auth/argument-error','auth/invalid-id-token','auth/id-token-expired',
+    'auth/id-token-revoked','auth/user-disabled','auth/user-not-found',
+    'auth/internal-error','auth/insufficient-permission','auth/invalid-credential','auth/future-error','ETIMEDOUT',undefined]){
+    state.verificationFailure=Object.assign(new Error('Private SDK detail'),{code});
+    const rejected=['auth/argument-error','auth/invalid-id-token','auth/id-token-expired',
+      'auth/id-token-revoked','auth/user-disabled','auth/user-not-found'].includes(code);
+    const result=await call('/settings');
+    assert.equal(result.status,rejected?401:503,code);
+    assert.deepEqual(result.body,{message:rejected?'Animal access is unavailable.':'Authentication is unavailable.'});
+  }
+  state.verificationFailure=null;
+  assert.equal((await call('/settings')).status,200);
+  assert.equal(state.animals.size,0);
+});
 test('workflow gate, authentication and staff function separation deny unauthorized records',async t=>{
   const {call,state}=await fixture(t,false);assert.equal((await call('','inventory','POST',input)).status,503);assert.equal(state.animals.size,0);
   assert.equal((await call('',null)).status,401);assert.equal((await call('','expired')).status,401);

@@ -8,6 +8,7 @@ import { createAccountsRouter, createAccountStore, createFirebaseInvitationSende
 import { createAnimalRouter, createAnimalStore, createAnimalMobileAuth } from './animals.js';
 import { createOperationsRouter, createOperationsStore, syntheticOperationsEnabled } from './operations.js';
 import { registerReadiness, registerWebAssets } from './hosting.js';
+import { isValidHeadcount } from './headcounts.js';
 
 const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -959,6 +960,9 @@ app.post('/api/invoices', asyncHandler(async (req, res) => {
 
   const cowHeads = Number(payload.number_of_heads_cow || 0);
   const pigHeads = Number(payload.number_of_heads_pig || 0);
+  if (!isValidHeadcount(cowHeads) || !isValidHeadcount(pigHeads)) {
+    return res.status(400).json({ message: 'Headcounts must be integers from 0 through 2147483647.' });
+  }
   if (cowHeads + pigHeads <= 0) {
     return res.status(400).json({ message: 'At least one head (cow or pig) is required.' });
   }
@@ -1084,7 +1088,7 @@ app.patch('/api/invoices/:id', asyncHandler(async (req, res) => {
     if (!current) return res.status(404).json({ message: 'Invoice not found.' });
     const cow = req.body.number_of_heads_cow !== undefined ? Number(req.body.number_of_heads_cow) : current.number_of_heads_cow;
     const pig = req.body.number_of_heads_pig !== undefined ? Number(req.body.number_of_heads_pig) : current.number_of_heads_pig;
-    if (!Number.isFinite(cow) || !Number.isFinite(pig) || cow < 0 || pig < 0 || cow + pig <= 0) return res.status(400).json({ message: 'Headcounts must be valid non-negative numbers with at least one head.' });
+    if (!isValidHeadcount(cow) || !isValidHeadcount(pig) || cow + pig <= 0) return res.status(400).json({ message: 'Headcounts must be integers from 0 through 2147483647 with at least one head.' });
     const breakdown = await computeFeeBreakdown(cow, pig);
     patch.number_of_heads_cow = cow;
     patch.number_of_heads_pig = pig;
