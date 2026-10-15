@@ -1,0 +1,210 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "animal_audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "animalId", "order": "ASCENDING" },
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "animal_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "vendorBusinessId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "account_audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetUid", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vendors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slaughter_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendor_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "vendor_id", "order": "ASCENDING" },
+        { "fieldPath": "date_issued", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "payment_status", "order": "ASCENDING" },
+        { "fieldPath": "date_issued", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "is_read", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "vendor_id", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "workflow", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "workflow", "order": "ASCENDING" },
+        { "fieldPath": "vendor_id", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slaughter_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slaughter_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "animal_type", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "date_issued", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "payment_status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "total_amount", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "corral_fee", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "delivery_fee", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "anti_mortem_fee", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "facility_fee", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "date_issued", "order": "ASCENDING" },
+        { "fieldPath": "total_amount", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slaughter_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "animal_type", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "number_of_heads", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slaughter_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "animal_type", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "number_of_heads", "order": "ASCENDING" },
+        { "fieldPath": "number_of_heads_cow", "order": "ASCENDING" },
+        { "fieldPath": "number_of_heads_pig", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "slaughter_records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "municipalScopeId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

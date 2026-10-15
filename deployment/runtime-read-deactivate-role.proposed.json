@@ -1,0 +1,14 @@
+{
+  "title": "Municipal runtime reads and emergency deactivation",
+  "description": "Permission specification for existing runtime identity: API reads and emergency deactivation. Assignment manually observed by user; runtime permissions not tested.",
+  "stage": "GA",
+  "includedPermissions": [
+    "datastore.databases.get",
+    "datastore.entities.get",
+    "datastore.entities.list",
+    "datastore.entities.create",
+    "datastore.entities.update",
+    "firebaseauth.users.get",
+    "firebaseauth.users.update"
+  ]
+}
