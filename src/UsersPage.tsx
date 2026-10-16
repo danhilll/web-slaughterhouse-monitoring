@@ -39,7 +39,7 @@ function StaffPermissionEditor({ account, onSaved }: { account: Account; onSaved
       <button className="btn-secondary" type="submit">{busy ? 'Saving...' : 'Save staff functions'}</button>
     </fieldset>
     <p className="mt-2 text-xs text-slate-500">Saving functions does not activate access. Pending staff need at least one saved function before administrator activation. Workflow availability is controlled separately.</p>
-    {message && <p role="status" className="mt-2 text-sm text-emerald-700">{message}</p>}
+    {message && <p role="status" className="mt-2 text-sm text-green-700">{message}</p>}
     {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
   </form>;
 }
@@ -100,7 +100,7 @@ export function UsersPage() {
       {loading && <p role="status" className="mt-4">Loading account settings...</p>}
       {!loading && !settings?.enabled && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-amber-900">Account management is awaiting approved municipal setup. Live account creation is currently unavailable.</p>}
       {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-4 text-red-800">{error}</p>}
-      {notice && <p role="status" className="mt-4 rounded-xl bg-emerald-50 p-4 text-emerald-800">{notice}</p>}
+      {notice && <p role="status" className="mt-4 rounded-xl bg-green-50 p-4 text-green-800">{notice}</p>}
     </section>
     {settings?.enabled && <>
       {settings.canManageAccounts && <>

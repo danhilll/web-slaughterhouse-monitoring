@@ -3,7 +3,7 @@ import { Pause, Play } from 'lucide-react';
 
 const MOTION_KEY = 'slaughterhouse-motion';
 const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
-const MotionContext = createContext({ motionEnabled: false, systemReduced: false, toggleMotion: () => {} });
+const MotionContext = createContext({ motionEnabled: false, systemReduced: false, pageVisible: true, toggleMotion: () => {} });
 
 export function WorkspaceMotion({ children }: { children: ReactNode }) {
   const [paused, setPaused] = useState(() => {
@@ -32,7 +32,7 @@ export function WorkspaceMotion({ children }: { children: ReactNode }) {
   const motionEnabled = !paused && !systemReduced;
 
   return (
-    <MotionContext.Provider value={{ motionEnabled, systemReduced, toggleMotion }}>
+    <MotionContext.Provider value={{ motionEnabled, systemReduced, pageVisible, toggleMotion }}>
       <div className="motion-root" data-motion={motionEnabled ? 'enabled' : 'paused'} data-page-visible={pageVisible}>
         {children}
       </div>

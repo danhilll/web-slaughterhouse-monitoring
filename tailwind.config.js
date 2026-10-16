@@ -11,22 +11,19 @@ export default {
       },
       colors: {
         slate: {
-          50: '#fafaf7', 100: '#f2f2ed', 200: '#e3e4dc', 300: '#cccec3',
-          400: '#969a8e', 500: '#6b7064', 600: '#53594c', 700: '#3e4438',
-          800: '#2c3029', 900: '#20231e', 950: '#171a15'
+          50: '#faf8f7', 100: '#f2efed', 200: '#e4dfdc', 300: '#cec8c3',
+          400: '#9a938e', 500: '#706964', 600: '#59514c', 700: '#443d38',
+          800: '#302c29', 900: '#23201e', 950: '#1a1715'
         },
+        // Legacy emerald utility names now carry the municipal orange brand.
         emerald: {
-          50: '#f7fae9', 100: '#edf4c8', 200: '#e1ee9a', 300: '#d6ec70',
-          400: '#d5ed48', 500: '#a7bf2b', 600: '#72841c', 700: '#566619',
-          800: '#424f19', 900: '#333e18', 950: '#20280e'
+          50: '#fff7ed', 100: '#ffedd5', 200: '#fed7aa', 300: '#fdba74',
+          400: '#fb923c', 500: '#f97316', 600: '#c2410c', 700: '#9a3412',
+          800: '#7c2d12', 900: '#7c2d12', 950: '#431407'
         },
         brand: {
-          50: '#effdf7',
-          100: '#d8fbe9',
-          500: '#16a34a',
-          600: '#059669',
-          700: '#166534',
-          900: '#064e3b'
+          50: '#fff7ed', 100: '#ffedd5', 500: '#f97316',
+          600: '#c2410c', 700: '#9a3412', 900: '#7c2d12'
         },
         accent: {
           500: '#f59e0b'
@@ -35,7 +32,7 @@ export default {
       keyframes: {
         'fade-up': {
           from: { opacity: '0', transform: 'translateY(10px)' },
-          to: { opacity: '1', transform: 'translateY(0)' }
+          to: { opacity: '1', transform: 'none' }
         },
         'fade-in': {
           from: { opacity: '0' },

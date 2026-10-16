@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -51,7 +52,7 @@ import { OperationsPage } from './OperationsPage';
 import { AmbientBackdrop, LedgerArtwork, WorkspaceBrand } from './WorkspaceIdentity';
 import { MotionToggle, useWorkspaceMotion } from './WorkspaceMotion';
 
-const COLORS = ['#a3b92e', '#9d92c6', '#dda771', '#6d9386'];
+const COLORS = ['#c2410c', '#9d92c6', '#dda771', '#6d9386'];
 
 // Themed Recharts tooltip (U3). Set `money` to format values as PHP.
 const ChartTooltip = ({ active, payload, label, money }: any) => {
@@ -231,7 +232,10 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
   const [feesConfigured, setFeesConfigured] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    try { return localStorage.getItem('slaughterhouse-dark-mode') === '1'; }
+    catch { return false; }
+  });
   // B20: per-section load errors. One failing endpoint no longer discards the
   // other five responses; failed sections keep prior data and report here.
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
@@ -283,12 +287,6 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
   };
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('slaughterhouse-dark-mode');
-      if (saved === '1') setDarkMode(true);
-    } catch {
-      // ignore storage errors
-    }
     void loadData();
     return () => listRequest.current?.abort();
   }, []);
@@ -300,6 +298,9 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
       // ignore
     }
     document.documentElement.classList.toggle('dark', darkMode);
+    // The signed-out form uses its own light palette. Do not leave dark input
+    // utilities active there after the authenticated workspace unmounts.
+    return () => document.documentElement.classList.remove('dark');
   }, [darkMode]);
 
   useEffect(() => {
@@ -552,8 +553,8 @@ function App({ session, onLogout }: { session: WebSession; onLogout: () => Promi
 
       {toast && (
         <div className="animate-fade-up fixed bottom-5 right-5 z-[60] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-lift dark:border-slate-700 dark:bg-slate-900" role="status">
-          <div className={`flex items-center gap-3 ${toast.type === 'error' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-            <span className={`h-2.5 w-2.5 rounded-full ${toast.type === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`} />
+          <div className={`flex items-center gap-3 ${toast.type === 'error' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+            <span className={`h-2.5 w-2.5 rounded-full ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-500'}`} />
             <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{toast.message}</span>
           </div>
         </div>
@@ -2498,6 +2499,7 @@ function EmptyState({ title, message }: { title: string; message: string }) {
 }
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  const { motionEnabled, pageVisible } = useWorkspaceMotion();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -2510,11 +2512,13 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
     };
   }, [onClose]);
 
-  return (
-    <div className="fixed inset-0 z-40 overflow-y-auto p-4">
+  // Page entrance transforms create containing blocks for fixed descendants.
+  // Mount dialogs outside those pages so motion cannot trap/clip the overlay.
+  return createPortal(
+    <div className="motion-root modal-layer fixed inset-0 z-50 overflow-y-auto p-4" data-motion={motionEnabled ? 'enabled' : 'paused'} data-page-visible={pageVisible}>
       <button type="button" aria-label="Close dialog" onClick={onClose} className="overlay-enter fixed inset-0 bg-slate-950/55 backdrop-blur-sm" />
-      <div className="relative flex min-h-full items-center justify-center">
-      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="modal-panel-enter relative flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lift dark:border-slate-700 dark:bg-slate-900">
+      <div className="pointer-events-none relative flex min-h-full items-center justify-center">
+      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="modal-panel-enter pointer-events-auto relative flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lift dark:border-slate-700 dark:bg-slate-900">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/70 px-5 pb-4 pt-5 dark:border-slate-700/70 md:px-6 md:pt-6">
           <div className="flex items-center gap-3">
             <div className="h-8 w-1.5 rounded-full bg-gradient-to-b from-emerald-400 to-emerald-700" />
@@ -2527,7 +2531,8 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
         <div className="modal-body-scroll px-5 pb-5 pt-5 md:px-6 md:pb-6">{children}</div>
       </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

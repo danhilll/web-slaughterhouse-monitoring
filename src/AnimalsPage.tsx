@@ -40,7 +40,7 @@ export function AnimalsPage(){
     <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900"><h2 className="text-xl font-bold">Animal register</h2><p className="mt-2 text-sm text-slate-500">Individual animal identity, vendor ownership, weighing details and inspection status.</p><p className="mt-3 text-sm">Inspector approval applies to the recorded revision. Correcting ownership, species or weight requires inspection again.</p>
       {loading&&<p role="status" className="mt-3">Loading animal settings…</p>}{!loading&&!settings?.enabled&&<p className="mt-4 rounded-xl bg-amber-50 p-4 text-amber-900">Animal recording is awaiting pilot activation. No live records can be changed here yet.</p>}
       {!loading&&settings?.enabled&&<p className="mt-3 text-sm text-amber-800 dark:text-amber-300">Dressed carcass weight is separate from live weight. Included/excluded body parts await slaughterhouse confirmation.{!settings.carcassWeightEnabled&&' Carcass recording is disabled pending policy approval.'}</p>}
-      {error&&<p role="alert" className="mt-4 rounded-xl bg-red-50 p-4 text-red-800">{error}</p>}{notice&&<p role="status" className="mt-4 rounded-xl bg-emerald-50 p-4 text-emerald-800">{notice}</p>}
+      {error&&<p role="alert" className="mt-4 rounded-xl bg-red-50 p-4 text-red-800">{error}</p>}{notice&&<p role="status" className="mt-4 rounded-xl bg-green-50 p-4 text-green-800">{notice}</p>}
     </section>
     {settings?.enabled&&<>
       {settings.canRecord&&<form className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900" onSubmit={e=>{e.preventDefault();void act(async()=>{

@@ -12,7 +12,7 @@ export function VendorRegistrationForm({ onRegistered }: { onRegistered: (vendor
   const [notice, setNotice] = useState('');
   return <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">1. Confirm the vendor business</h3><p className="mt-1 text-sm text-slate-500">Use an existing approved business, or register it after checking its market stall assignment.</p></div><button className="btn-secondary" type="button" disabled={busy} onClick={() => setOpen(!open)}>{open ? 'Close registration' : 'Register vendor business'}</button></div>
-    {notice && <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+    {notice && <p role="status" className="mt-3 rounded-xl bg-green-50 p-3 text-sm text-green-800">{notice}</p>}
     {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {open && <form className="mt-5" onSubmit={e => { e.preventDefault(); if (busy) return; setBusy(true); setError(''); setNotice(''); void (async () => {
       try {
