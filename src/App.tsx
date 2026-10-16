@@ -1552,7 +1552,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     y += 8;
     pdf.setFontSize(16);
     pdf.setFont('helvetica', 'bold');
-    pdf.text('Official Receipt - Slaughterhouse Service Fees', margin, y, { maxWidth: 180 });
+    pdf.text('Invoice record - Slaughterhouse Service Fees', margin, y, { maxWidth: 180 });
     y += 12;
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
@@ -1576,10 +1576,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
     pdf.setFont('helvetica', 'normal');
     y += 10;
     pdf.setFontSize(10);
-    pdf.text('SAME-DAY PAYMENT REQUIRED. Payment must be settled on the date of slaughter. No advance payment accepted.', margin, y, { maxWidth: 180 });
-    y += 20;
-    pdf.text('Vendor Signature: ___________________', margin, y);
-    pdf.text('Treasurer Signature: ___________________', 110, y);
+    pdf.text('Historical record copy; not an official receipt. Official fees, numbering, payment terms and correction policies await approval.', margin, y, { maxWidth: 180 });
     pdf.save(`${invoice.id}.pdf`);
   };
 
@@ -1787,12 +1784,12 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
       )}
 
       {selectedInvoice && (
-        <Modal title="Invoice Receipt" onClose={() => setSelectedInvoice(null)}>
+        <Modal title="Invoice record" onClose={() => setSelectedInvoice(null)}>
           <div className="space-y-4">
             <div className="print-area rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-800">
               <div className="text-center">
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Municipal Government of {municipalityName}</p>
-                <h3 className="mt-2 text-xl font-bold">Official Receipt — Slaughterhouse Service Fees</h3>
+                <h3 className="mt-2 text-xl font-bold">Invoice record — Slaughterhouse Service Fees</h3>
               </div>
               <div className="mt-6 grid gap-3 text-sm md:grid-cols-2">
                 <div><span className="text-slate-500 dark:text-slate-400">Vendor:</span> <strong>{selectedInvoice.vendor_name || 'N/A'}</strong></div>
@@ -1811,17 +1808,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                 <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold dark:border-slate-700"><span>Grand Total</span><span>{formatCurrency(selectedInvoice.total_amount)}</span></div>
               </div>
               <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-800">
-                SAME-DAY PAYMENT REQUIRED. Payment must be settled on the date of slaughter. No advance payment accepted.
-              </div>
-              <div className="mt-8 flex justify-between gap-6 border-t border-slate-200 pt-4 text-sm dark:border-slate-700">
-                <div className="flex-1">
-                  <p className="text-slate-500 dark:text-slate-400">Vendor Signature</p>
-                  <div className="mt-8 border-b border-slate-400 pb-1" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-slate-500 dark:text-slate-400">Treasurer Signature</p>
-                  <div className="mt-8 border-b border-slate-400 pb-1" />
-                </div>
+                Historical record copy; not an official receipt. Official fees, numbering, payment terms and correction policies await approval.
               </div>
               {selectedInvoice.notes && (
                 <p className="text-sm text-slate-600 dark:text-slate-300"><span className="font-medium">Notes:</span> {selectedInvoice.notes}</p>

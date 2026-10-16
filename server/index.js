@@ -1,4 +1,5 @@
 import express from 'express';
+import { createApiErrorHandler } from './api-errors.js';
 import { summarizeHeadcounts, summarizeAmounts, validDay } from '../shared/reporting.js';
 import { createScopedListRouter } from './scoped-lists.js';
 import { createScopedReads } from './scoped-reads.js';
@@ -1131,15 +1132,7 @@ registerWebAssets(app, {
 });
 
 // Centralized error handler (must be registered after all routes).
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-  console.error('[api] Unhandled error:', err?.message || err);
-  if (res.headersSent) return next(err);
-  if (err?.status === 413) return res.status(413).json({ message: 'Request body is too large.' });
-  if (err?.status === 503) return res.status(503).json({ message: err.publicMessage === true ? err.message : 'API read is unavailable.' });
-  if (err?.status === 400) return res.status(400).json({ message: 'Invalid request body.' });
-  res.status(500).json({ message: 'Internal server error.' });
-});
+app.use(createApiErrorHandler());
 
 const start = async () => {
   if (WEB_ADMIN_UIDS.size === 0) throw new Error('WEB_ADMIN_UIDS must list at least one Firebase Authentication UID.');

@@ -22,8 +22,9 @@ try {
   const firebase = path.join(fixture, 'mock-firebase.ts');
   await writeFile(firebase, 'export const auth=null; export const isFirebaseConfigured=true;');
   await writeFile(api, `export const WEB_ACCESS_LOST_EVENT='mock-access-lost';
+    const invoices=['Unpaid','Paid'].map(payment_status=>({id:'UI-'+payment_status,vendor_id:'UI-VENDOR',vendor_name:'Synthetic vendor',date_issued:'2026-10-16',due_date:'2026-10-16',number_of_heads_cow:0,number_of_heads_pig:1,corral_fee:1,delivery_fee:0,anti_mortem_fee:1,facility_fee:1,total_amount:3,payment_status}));
     export async function apiFetch(url:string) {
-      const body=url.startsWith('/api/service-fees')?{fee_config:[],configured:true}:url.startsWith('/api/dashboard')?{}:{items:[],nextCursor:null};
+      const body=url.startsWith('/api/service-fees')?{fee_config:[],configured:true}:url.startsWith('/api/dashboard')?{}:{items:url.startsWith('/api/invoices')?invoices:[],nextCursor:null};
       return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
     }`);
   await writeFile(path.join(fixture, 'index.html'), '<div id="root"></div><script type="module" src="/entry.tsx"></script>');
@@ -101,6 +102,26 @@ try {
       await page.getByRole('button',{name:button,exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Close',exact:true}).click();
       await dialog.waitFor({state:'detached'});
+      if (label==='Invoices' && width===1280 && !dark && !paused) {
+        for (const status of ['Unpaid','Paid']) {
+          await page.getByRole('button',{name:`View invoice UI-${status}`,exact:true}).click();
+          const record=page.getByRole('dialog',{name:'Invoice record',exact:true});
+          const printText=await record.locator('.print-area').innerText();
+          assert.match(printText,/Historical record copy; not an official receipt/);
+          assert.match(printText,/policies await approval/);
+          assert.doesNotMatch(printText,/Official Receipt|SAME-DAY PAYMENT REQUIRED|No advance payment accepted|Treasurer Signature/);
+          const downloadPromise=page.waitForEvent('download');
+          await record.getByRole('button',{name:'Download PDF',exact:true}).click();
+          const download=await downloadPromise;
+          const chunks=[]; for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+          const pdf=Buffer.concat(chunks).toString('latin1');
+          assert.match(pdf,/Invoice record - Slaughterhouse Service Fees/);
+          assert.match(pdf,/not an official receipt/);
+          assert.doesNotMatch(pdf,/Official Receipt|SAME-DAY PAYMENT REQUIRED|No advance payment accepted|Treasurer Signature/);
+          await record.getByRole('button',{name:'Close',exact:true}).click();
+          console.log(`PASS: ${status} invoice display/print/PDF makes no unapproved receipt or payment-policy claim`);
+        }
+      }
     }
     await page.getByRole('button',{name:'Profile menu'}).click();
     await page.getByRole('button',{name:'Sign out',exact:true}).click();

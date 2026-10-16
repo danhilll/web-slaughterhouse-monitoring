@@ -23,5 +23,8 @@ The eight cases cover desktop/mobile viewport sizes, light/dark themes and
 motion enabled/paused. They exercise profile-menu hit testing; vendor-dialog
 viewport bounds, input, close button, backdrop and Escape; theme/motion toggles;
 invoice/record dialog navigation; mobile navigation; and logout theme cleanup
-with login-input contrast. They do not verify live mutations, disabled business
+with login-input contrast. The desktop light/motion-enabled case also opens
+synthetic paid and unpaid invoices and checks the displayed/printable copy and
+downloaded PDF for neutral historical-record wording without official-receipt
+or unapproved payment-policy claims. They do not verify live mutations, disabled business
 gates, Safari-specific rendering, or every feature in the application.
