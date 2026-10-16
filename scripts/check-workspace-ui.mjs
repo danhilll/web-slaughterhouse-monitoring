@@ -4,7 +4,7 @@
  * set CHROMIUM_EXECUTABLE. No live credentials or services are used.
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from 'vite';
@@ -114,10 +114,29 @@ try {
           await record.getByRole('button',{name:'Download PDF',exact:true}).click();
           const download=await downloadPromise;
           const chunks=[]; for await (const chunk of await download.createReadStream()) chunks.push(chunk);
-          const pdf=Buffer.concat(chunks).toString('latin1');
+          const bytes=Buffer.concat(chunks);
+          const pdf=bytes.toString('latin1');
+          assert.equal(download.suggestedFilename(),`UI-${status}.pdf`);
+          assert.match(pdf,/^%PDF-1\.[0-9]/);
+          assert.match(pdf,/%%EOF\s*$/);
+          assert.match(pdf,/\/Type \/Page\b/);
           assert.match(pdf,/Invoice record - Slaughterhouse Service Fees/);
+          assert.match(pdf,/Vendor: Synthetic vendor/);
+          assert.match(pdf,new RegExp(`Invoice #: UI-${status}`));
+          assert.match(pdf,/Heads - Cow: 0   Pig: 1/);
+          assert.match(pdf,/Total heads: 1/);
+          assert.ok(pdf.includes('Date Issued: 10/16/2026   Due: 10/16/2026'));
+          for(const [label,amount] of [['Corral/Casket Fee','1.00'],['Delivery Fee','0.00'],['Anti/Post Mortem Fee','1.00'],['Facility Fee','1.00']])
+            assert.ok(pdf.includes(`${label}: PHP ${amount}`),`PDF must retain ${label} and its amount`);
+          assert.ok(pdf.includes(`TOTAL: PHP 3.00   [${status}]`));
           assert.match(pdf,/not an official receipt/);
           assert.doesNotMatch(pdf,/Official Receipt|SAME-DAY PAYMENT REQUIRED|No advance payment accepted|Treasurer Signature/);
+          // jsPDF's default OpenAction only selects the first page/zoom; reject executable actions.
+          assert.doesNotMatch(pdf,/\/JavaScript\b|\/JS\b|\/Launch\b/);
+          if(process.env.PDF_EVIDENCE_DIR){
+            await mkdir(process.env.PDF_EVIDENCE_DIR,{recursive:true,mode:0o700});
+            await writeFile(path.join(process.env.PDF_EVIDENCE_DIR,download.suggestedFilename()),bytes,{mode:0o600});
+          }
           await record.getByRole('button',{name:'Close',exact:true}).click();
           console.log(`PASS: ${status} invoice display/print/PDF makes no unapproved receipt or payment-policy claim`);
         }

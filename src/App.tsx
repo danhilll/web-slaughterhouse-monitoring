@@ -40,11 +40,11 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import { jsPDF } from 'jspdf';
+import { createInvoicePdf } from './invoicePdf';
 import type { DashboardData, FeeConfig, Invoice, NotificationItem, SlaughterRecord, Vendor } from './types';
 import type { WebSession } from './AuthGate';
 import { apiFetch } from './api';
-import { recordedHeads, readHeadcount, readAmount, headcountText, speciesText, summarizeHeadcounts, headcountCoverageText, invoiceHeadcounts, invoiceHeadcountLines, summarizeAmounts, amountCoverageText, validDay } from '../shared/reporting.js';
+import { recordedHeads, readHeadcount, readAmount, headcountText, speciesText, summarizeHeadcounts, headcountCoverageText, invoiceHeadcounts, summarizeAmounts, amountCoverageText, validDay } from '../shared/reporting.js';
 import { fetchCompleteList, listViewState } from './listPages';
 import { UsersPage } from './UsersPage';
 import { AnimalsPage } from './AnimalsPage';
@@ -1427,8 +1427,10 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
 
 function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading, addInvoice, updateInvoice, deleteInvoice, showToast, municipality }: { vendors: Vendor[]; invoices: Invoice[]; slaughterRecords: SlaughterRecord[]; feeConfig: FeeConfig[]; loading: boolean; addInvoice: (payload: any) => Promise<void>; updateInvoice: (id: string, payload: any) => Promise<void>; deleteInvoice: (id: string) => Promise<void>; showToast: (msg: string, type?: 'success' | 'error') => void; municipality?: string }) {
   const municipalityName = municipality || 'Calauag';
+  const [pdfExportError, setPdfExportError] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  useEffect(() => setPdfExportError(''), [selectedInvoice?.id]);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ status: 'All', vendor: 'All' });
   const [page, setPage] = useState(1);
@@ -1544,40 +1546,15 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
   };
 
   const exportPdf = (invoice: Invoice) => {
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
-    const margin = 15;
-    let y = 20;
-    pdf.setFontSize(12);
-    pdf.text(`Municipal Government of ${municipalityName}`, margin, y);
-    y += 8;
-    pdf.setFontSize(16);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('Invoice record - Slaughterhouse Service Fees', margin, y, { maxWidth: 180 });
-    y += 12;
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(11);
-    pdf.text(`Vendor: ${invoice.vendor_name || 'N/A'}`, margin, y);
-    y += 7;
-    pdf.text(`Date Issued: ${formatDate(invoice.date_issued)}   Due: ${formatDate(invoice.due_date)}`, margin, y);
-    y += 7;
-    pdf.text(`Invoice #: ${invoice.id}`, margin, y);
-    y += 7;
-    for(const line of invoiceHeadcountLines(invoice)){pdf.text(line,margin,y,{maxWidth:180});y+=10;}
-    pdf.text(`Corral/Casket Fee: ${formatCurrency(invoice.corral_fee)}`, margin, y);
-    y += 7;
-    pdf.text(`Delivery Fee: ${formatCurrency(invoice.delivery_fee)}`, margin, y);
-    y += 7;
-    pdf.text(`Anti/Post Mortem Fee: ${formatCurrency(invoice.anti_mortem_fee)}`, margin, y);
-    y += 7;
-    pdf.text(`Facility Fee: ${formatCurrency(invoice.facility_fee)}`, margin, y);
-    y += 10;
-    pdf.setFont('helvetica', 'bold');
-    pdf.text(`TOTAL: ${formatCurrency(invoice.total_amount)}   [${invoice.payment_status}]`, margin, y);
-    pdf.setFont('helvetica', 'normal');
-    y += 10;
-    pdf.setFontSize(10);
-    pdf.text('Historical record copy; not an official receipt. Official fees, numbering, payment terms and correction policies await approval.', margin, y, { maxWidth: 180 });
-    pdf.save(`${invoice.id}.pdf`);
+    setPdfExportError('');
+    try {
+      createInvoicePdf(invoice, {
+        municipalityName,
+        business: vendors.find(vendor => vendor.id === invoice.vendor_id)
+      }).save(`${invoice.id}.pdf`);
+    } catch (error) {
+      setPdfExportError(getErrorMessage(error, 'PDF export is unavailable. No PDF was downloaded.'));
+    }
   };
 
   const printReceipt = () => {
@@ -1814,6 +1791,8 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                 <p className="text-sm text-slate-600 dark:text-slate-300"><span className="font-medium">Notes:</span> {selectedInvoice.notes}</p>
               )}
             </div>
+
+            {pdfExportError && <p role="alert" className="no-print text-sm text-red-700 dark:text-red-300">{pdfExportError}</p>}
 
             <div className="modal-sticky-footer no-print flex flex-wrap justify-end gap-3">
               <button type="button" onClick={() => void handleStatusChange(selectedInvoice, selectedInvoice.payment_status === 'Paid' ? 'Unpaid' : 'Paid')} disabled={actioningId === selectedInvoice.id} className="btn-secondary">
