@@ -185,3 +185,31 @@ Recommend a **supervised read-only web acceptance session with approved existing
 4. With existing approved mobile vendor/staff/inspector identities on the reviewed artifact, confirm `/api/mobile/me` and permitted own/scoped reads. Check denial with an existing inappropriate identity and verify vendor ownership without fetching another person's records as a test fixture. Tampered/cross-user cursor cases stay local. No approved mobile identities/artifact were available for automated acceptance here.
 5. Before any operational release, obtain the approved carcass inclusion/exclusion definition; versioned official fee basis/amounts; invoice/receipt numbering; payment timing/receipt policy; and correction/reversal procedure. Confirm onboarding/activation responsibility, vendor/stall ownership, recovery and verified-email policy. Do not infer approval from earlier rehearsal code or successful login.
 6. Android navigation and excluded-asset verifier source defects were resolved in `eb2d519`; preserve physical combined-role rollback/navigation acceptance, release signing, authenticated phone HTTPS, isolation/offline/map/GPS acceptance as open. A clean-checkout rebuild has not been newly performed. Establish the matched artifact/config rollback target, backup/recovery, monitoring and retention before ongoing real-user use.
+
+### Supervised acceptance follow-up — user-observed emulator evidence
+
+- [x] Owner reports vendor login and manual button checks now work in the **normal Android debug app on an emulator**. Record as user-observed emulator evidence only. Exact button coverage, API responses and backend gate values were not supplied; no operational-write success, isolation, signed-release, physical-device or mobile-network acceptance is inferred. Existing physical-device acceptance items remain open.
+- Earlier supervised attempt: Safari blocked inspection while “Allow JavaScript from Apple Events” was disabled; no authenticated API requests or logout occurred then. This historical blocker is superseded for the administrator checks recorded below. Never paste tokens, passwords, raw responses or personal records.
+- No application or production configuration was changed for this follow-up; no live writes, account changes, gate changes, commit, push or deployment occurred. The administrator GET-only procedure above remains the acceptance requirement; public health/anonymous 401s and emulator success cannot substitute for it.
+
+### Authenticated deployed administrator acceptance — 2026-10-16 12:58 UTC
+
+Owner enabled Safari Apple Events inspection and prepared the approved deployed administrator tab. The reviewed private browser probe ran against `https://web-slaughterhouse-monitoring.onrender.com`. The first attempt stopped before API requests because its existing stored token had expired; reloading the app through its normal Firebase session recovery restored the workspace. No token/password/private record was returned to the assistant. The acceptance probe used GET only; no gates, accounts, data or settings were changed.
+
+| Check | Result | Sanitized evidence |
+| --- | --- | --- |
+| Authenticated administrator session | Passed | `/api/session` 200; role administrator and returned UID matches the private browser session; no identity value recorded. |
+| Effective production gates | Passed | Exactly nine capabilities false and `writesEnabled:false`; response `no-store`. |
+| Authenticated runtime read health | Passed | `/api/health` 200, `store:"firestore"`, `no-store`. This accepts observed runtime reads, not every IAM operation or an exact backend commit. |
+| Account settings | Passed | 200, expected municipality scope, historical reads enabled, management/activation false, intended emergency `canDeactivate:true`; no deactivation attempted. |
+| Animal/operations settings | Passed | Both 200; historical reads enabled and all reviewed recording/carcass/billing/payment/delivery/tracking flags false. |
+| Four scoped register first pages | Passed | Vendors, slaughter records, invoices and notifications: 200 JSON with bounded `pageSize=1`, correct scope for returned rows and `no-store`; approximately 334–510 ms per request. Vendor page nonempty; other three pages empty. |
+| Actual page-boundary traversal | Unverified | None of the four first pages returned `nextCursor`; existing data did not provide a page boundary, and no fixtures were created. |
+| Invoice detail | Unverified | No eligible existing invoice returned; no guessed IDs or other-user record probes. |
+| Animal history register | Passed | 200 scoped list, `no-store`. |
+| Animal audit/detail history | Unverified | No eligible existing animal returned for a detail/history request. |
+| Dashboard | Passed | 200 with summary and explicit record-basis label; `no-store`, approximately 500 ms. Does not certify historical financial reconciliation. |
+| Cross-identity/cross-record isolation | Unverified | No explicit test identity/record pair was approved; no such probes performed. |
+| Logout | Passed — 2026-10-16 13:00 UTC | Owner confirmed using the application's normal Sign out button. Token-free probe confirmed sign-in screen visible, workspace absent and no persisted default-app account. GET `/api/session` and `/api/mobile/me`, without Authorization headers, both returned 401. No former token was read or reused. This verifies client logout, not token revocation. |
+
+No failed application check was observed in this run. Vendor own-profile/invoice deployed acceptance remains separate from the user-observed Android emulator evidence. Physical-device, page-boundary/detail/history, isolation and operational-write acceptance items remain open.
