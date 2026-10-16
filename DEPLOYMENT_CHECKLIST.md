@@ -213,3 +213,52 @@ Owner enabled Safari Apple Events inspection and prepared the approved deployed 
 | Logout | Passed — 2026-10-16 13:00 UTC | Owner confirmed using the application's normal Sign out button. Token-free probe confirmed sign-in screen visible, workspace absent and no persisted default-app account. GET `/api/session` and `/api/mobile/me`, without Authorization headers, both returned 401. No former token was read or reused. This verifies client logout, not token revocation. |
 
 No failed application check was observed in this run. Vendor own-profile/invoice deployed acceptance remains separate from the user-observed Android emulator evidence. Physical-device, page-boundary/detail/history, isolation and operational-write acceptance items remain open.
+
+## Local web rehearsal preserve-mode restoration — 17 October 2026
+
+This result supersedes the historical completion/reconciliation-pending statements above and in
+ALL_ROLE_DEMO.md for the existing supported-onboarding synthetic run. Android reported one completed
+delivery (revision 5), Vendor A read agreement, Vendor B empty lists and exact-invoice detail/tracking
+404s, followed by normal mobile logout and restored force-stop. The separate web read-only audit
+verified exactly one completion event with matching assignee, animal, scope, time and final invoice
+snapshot. Android's case-sensitive UI animal-label assertion remains unverified; API identity matched.
+Those completed steps require no repetition. No new device action is authorized by this record.
+
+Added `--preserve-fixtures` to the documented web launcher, with read-only reserved-administrator
+prerequisite validation and no provisioning fallback. Existing default behavior retained. Nine focused
+startup/safety tests passed, along with syntax/diff checks. Started only missing 5004/5174 listeners;
+the existing Auth/Firestore/5002/5003 PIDs were unchanged. No gates or carcass flags changed.
+
+Web-owner checkpoint verification on 17 October ran the five startup tests and four existing safety
+tests once: nine passed, zero failures/cancellations/skips, exit 0. Sanitized execution output is saved
+locally at `.rehearsal-runtime/preserve-mode-checkpoint-20261017/focused-tests.sanitized.log`.
+These isolated tests use mocked startup dependencies and do not restart services or access fixtures.
+
+Authorized controlled browser reconciliation passed for the same Paid PHP95, Delivered revision 5
+invoice, payment/reference, assignment/destination, retained tracking and linked approved animal
+(revision 1, live 85.001kg, carcass 60.001kg, measurement revision 1, locked, with history).
+Normal sign-out cleared protected UI and persisted user in that browser context; five token-free
+GETs returned 401. Pre-existing browser tabs were untouched; no global logout/revocation claim.
+
+All 233 Firestore document hashes were unchanged after startup and browser checks. Auth count
+remained 35 with no additions/removals. The reserved administrator's hash differed both from before
+startup to after startup and from after startup to after browser reconciliation. Both differences remain
+unexplained: neither is established as session metadata. The initial and final phases retained hashes
+only, so changed field names cannot be recovered. The two saved raw administrator exports have no
+changed fields and both match the after-startup hash; they do not explain either hash difference.
+A separate direct before/after run of the actual preserve-mode reader reported no administrator
+field changes. A pre-existing Chrome connection was observed, without establishing causation.
+Do not claim full Auth preservation from these comparisons.
+
+Sanitized details/evidence are in Android's ignored `.rehearsal-runtime/web-preserve-restoration/`
+(`RESULTS.md`, `browser-results.json`); private readbacks/exports are not publication artifacts.
+No new fixtures, business writes, production access, healthy-service restarts, Android actions,
+commits or pushes. Android remains under its force-stopped hold. Historical incident cause remains
+unconfirmed; this is scoped synthetic acceptance, not complete production readiness.
+
+Reported tracking acceptance on Android checkpoint 95769a0 covers the observed permission,
+Start/Stop and lifecycle cases only. Exact in-flight HTTP timing, callback order, controller IDs and
+device maximum concurrency remain inconclusive; completion of an already-sent request after Stop
+was not established. Physical GPS/mobile-data/network recovery, production policies and operational
+enablement remain open. Existing security/dependency findings, including critical jsPDF, remain
+unresolved by this checkpoint. Production gates are unchanged; Android's hold remains intact.

@@ -102,3 +102,25 @@ Android `node rehearsal/verify-operations.mjs` (MOBILE_WEB_REPOSITORY set to thi
 ### Carcass recording opt-in
 
 Carcass recording is default-disabled in both rehearsal adapters. Use **`--enable-carcass-weight`**, with the existing validated `demo-mobile-rehearsal` loopback emulators. Android's adapter must also retain **`--preserve-fixtures`**. Exact launcher commands: [CARCASS_WEIGHT_API.md](../CARCASS_WEIGHT_API.md#explicit-rehearsal-launcher-option--2026-10-15). Observed UI acceptance and automated safety results are recorded separately in [CARCASS_REHEARSAL_RESULTS.md](../CARCASS_REHEARSAL_RESULTS.md). Do not restart healthy emulators or reset fixtures to enable this option.
+
+## Restore the web demo without provisioning fixtures
+
+With the existing guarded Auth/Firestore emulators healthy on 9199/8180 and web ports 5004/5174
+unoccupied, run `node rehearsal/web-demo.mjs --preserve-fixtures` with the documented demo-project
+and loopback emulator environment. This mode reads the reserved administrator with `getUser` and
+requires the expected UID/email, enabled and verified status, and existing password provider. The
+fixed UID allowlist grants web administrator access; no membership document or custom claim is added.
+Missing, conflicting or unreadable prerequisites stop startup before listeners open. Preserve mode
+never provisions users, claims or documents. It does not repair a missing account or changed password.
+Without the flag, the existing reserved-administrator provisioning behavior is unchanged.
+
+Run focused checks with `node --test rehearsal/web-demo-startup.test.mjs rehearsal/safety.test.mjs`.
+Do not restart healthy listeners or use default provisioning startup to restore a shared rehearsal.
+
+The 17 October preserve-mode restoration and reconciliation result in
+`DEPLOYMENT_CHECKLIST.md` supersedes earlier completion/reconciliation-pending statements in this
+README and `ALL_ROLE_DEMO.md` for the existing supported-onboarding synthetic run only. Delivery
+completion, vendor isolation, scoped completion audit, web reconciliation and controlled web logout
+are complete within that result's limits. It does not authorize another run or establish physical-device
+or production acceptance; the historical tracking cause and both administrator Auth hash differences
+remain unexplained.

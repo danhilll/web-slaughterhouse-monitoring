@@ -1,17 +1,11 @@
 // Standalone synthetic administrator UI; never reads the real .env.
-import { createRehearsalContext } from './context.mjs';
-import { rehearsalCarcassWeightEnabled } from './safety.mjs';
-const carcassWeightEnabled = rehearsalCarcassWeightEnabled();
-const context = await createRehearsalContext();
-if(context.hosts.auth.address!=='127.0.0.1:9199'||context.hosts.firestore.address!=='127.0.0.1:8180')throw Error('Use the documented rehearsal ports.');
+import { prepareWebDemo } from './web-demo-startup.mjs';
+const { context, carcassWeightEnabled, uid } = await prepareWebDemo();
 const [{default:express},{createServer},{default:react},{createWebAdminMiddleware},{createOperationsStore,createOperationsRouter},{createAnimalStore}]=await Promise.all([
   import('express'),import('vite'),import('@vitejs/plugin-react'),import('../server/access.js'),import('../server/operations.js'),import('../server/animals.js')
 ]);
 const {createAnimalRouter,createAnimalMobileAuth}=await import('../server/animals.js');
 const {createAccountStore,createAccountsRouter,createFirebaseInvitationSender}=await import('../server/accounts.js');
-const uid='ALL-ROLE-DEMO-WEB-ADMIN',email='web-admin@rehearsal.example.test';
-try{await context.auth.createUser({uid,email,password:'Synthetic-only-42!',emailVerified:true});}
-catch(e){if(e.code!=='auth/uid-already-exists')throw e;const user=await context.auth.getUser(uid);if(user.email!==email||user.disabled)throw Error('Reserved demo administrator requires review.');}
 const app=express();
 app.get('/rehearsal/health',(req,res)=>res.json({projectId:context.hosts.projectId,syntheticOnly:true}));
 app.use(express.json({limit:'16kb'}));
