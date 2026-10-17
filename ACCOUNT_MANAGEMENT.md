@@ -12,9 +12,9 @@ Before account creation, the administrator can register the confirmed business, 
 
 The server reserves the normalized email and records setup intent before creating a new Firebase identity. Existing Auth accounts are rejected without alteration. The initial password is randomly generated, never displayed, and the new Auth account starts disabled. Protected profile/membership writes, role/scope claims and activation are performed in sequence. Failures leave a visible, closed setup record; retrying creation does not duplicate the identity. Interrupted or failed provisioning requires administrator review; automated repair/reactivation is not implemented. Deactivation is available to stop interrupted setup.
 
-For a vendor, successful setup activates the mobile membership. Staff and Inspector memberships remain **pending** because those operational portals have not been implemented. All three roles can receive password setup requests, but a prepared account is not proof its portal is available.
+For a vendor, successful setup activates the mobile membership. Staff and Inspector memberships remain **pending** until an allowlisted administrator reviews and activates them. Inventory, billing, delivery and inspector screens are implemented; their production recording capabilities remain independently disabled. All three roles can receive password setup requests, but a prepared account is not proof its workflow is enabled.
 
-Staff functions are explicitly assigned: `inventory`, `billing` and `delivery`. The administrator can change these through the account card or `POST /api/accounts/{uid}/permissions` with `{ "staffPermissions": ["inventory"] }`. A transaction updates both the directory and protected membership and records the before/after assignment in account history. Changes do not activate pending accounts. Animal inventory and inspector server endpoints are now implemented locally; see ANIMAL_WORKFLOW.md. Android operational screens, billing and delivery operations remain pending.
+Staff functions are explicitly assigned: `inventory`, `billing` and `delivery`, with no default functions. The administrator can change these through the account card or `POST /api/accounts/{uid}/permissions` with `{ "staffPermissions": ["inventory"] }`. A transaction updates both the directory and protected membership and records the before/after assignment in account history. Changes do not activate pending accounts. Activation requires matching pending directory/profile/membership, current Auth role/scope claims, and at least one explicit function for staff; inspectors cannot receive staff functions. Activation preserves unrelated claims and profile fields. See ANIMAL_WORKFLOW.md and BILLING_DELIVERY_WORKFLOW.md for implemented operations and their separate production limitations.
 
 Firebase sends a password reset email as the setup invitation. Acceptance means Firebase accepted the request, not that an inbox received it. The treasurer does not receive the password or reset link. Resend is limited to one attempt per account per minute using a transaction. Delivery failure retains the original account and can be retried. Emulator invitations generate local action codes and never deliver real emails.
 
@@ -42,11 +42,11 @@ Do not enable in live configuration yet. Review the exact changes first:
 2. Approve canonical vendor business records with scope and ownership. Historical `vendorID` strings do not establish ownership.
 3. Confirm the server Firebase project and `VITE_FIREBASE_API_KEY` identify the same approved project. Invitation delivery uses this existing client identifier on the server, never an Admin private key in the browser.
 4. Review email templates/delivery and test with an approved mailbox. Decide email-verification policy; current mobile API does not require verified email.
-5. Review HTTPS hosting, IAM, rate controls and the added local `account_audit`/scoped-vendor index definitions. Indexes have not been deployed; emulators do not establish production index readiness.
-6. After explicit approval, set `ACCOUNT_MANAGEMENT_ENABLED=true` and the approved scope. Official business mutations remain independently paused by `WEB_WRITES_ENABLED=false`.
-7. Conduct the approved vendor physical-phone pilot before broader onboarding. Staff/Inspector workflows still need their own policy, endpoints and device validation.
+5. Review HTTPS hosting, runtime IAM, rate controls, actual invitation delivery and account/scoped-vendor query acceptance. The required composite indexes were observed READY and published deny-all rules confirmed in DEPLOYMENT_CHECKLIST.md; emulator success alone is not deployed acceptance.
+6. Production uses the reviewed manifest's independent `accountManagement` and `activation` capabilities; legacy `ACCOUNT_MANAGEMENT_ENABLED=true` cannot override it. The deployed administrator acceptance confirmed all nine capabilities off. Any future provisioning/IAM/configuration/enablement change requires separate review. `WEB_WRITES_ENABLED=false` still pauses legacy business mutations.
+7. Conduct the approved physical-phone pilot and role/ownership/revocation acceptance before broader onboarding. Implemented staff/inspector screens do not replace pending policy, signing and real-device validation.
 
-## Validation
+## Historical validation
 
 - `npm run test:server`: 47 passing tests, including 12 account tests covering authorization, duplicate prevention, rejected ownership/role fields, preserved claims, pending staff/inspector membership, provisioning failure, invitation retry, membership-first deactivation, business registration, optional contact validation and staff function assignment.
 - `npm run typecheck`: passed.
@@ -57,4 +57,8 @@ Run the emulator verification with both hosts explicitly set to `127.0.0.1:9199`
 
 ## Android operational rehearsal update — 2026-10-12
 
-Inventory, inspector, billing and delivery Android screens are now implemented in the isolated synthetic rehearsal. Billing/delivery depend on the new operations router; see BILLING_DELIVERY_WORKFLOW.md. Account creation still leaves staff/inspectors pending, assignment does not activate real users, and real activation remains separately reviewed work. Only reserved synthetic billing/delivery memberships were activated in the Firebase emulator; the account-management API's provisioning policy is unchanged.
+Inventory, inspector, billing and delivery Android screens are implemented. Billing/delivery depend on the operations router; see BILLING_DELIVERY_WORKFLOW.md. Account creation still leaves staff/inspectors pending. Supported administrator activation is now implemented and separately gated; the guarded web rehearsal panel exposes the real Users page and activation endpoint. Fresh rehearsal actors must be created there, rather than directly activated by fixture scripts. The current repeatable screen procedure is in ALL_ROLE_DEMO.md.
+
+## Current onboarding verification — 2026-10-16
+
+77 focused account/authentication/gate/animal/operations tests passed, including a five-persona regression for vendor, inventory-only, billing-only, delivery-only and inspector accounts. It verifies pending/active transitions, protected business links/scope, least-privilege function arrays, unrelated claim preservation and bootstrap-password non-disclosure. Production gates remain unchanged; fresh supported-onboarding screen rehearsal and physical-device acceptance are separate evidence.

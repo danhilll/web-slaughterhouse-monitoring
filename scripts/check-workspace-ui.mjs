@@ -23,7 +23,23 @@ try {
   await writeFile(firebase, 'export const auth=null; export const isFirebaseConfigured=true;');
   await writeFile(api, `export const WEB_ACCESS_LOST_EVENT='mock-access-lost';
     const invoices=['Unpaid','Paid'].map(payment_status=>({id:'UI-'+payment_status,vendor_id:'UI-VENDOR',vendor_name:'Synthetic vendor',date_issued:'2026-10-16',due_date:'2026-10-16',number_of_heads_cow:0,number_of_heads_pig:1,corral_fee:1,delivery_fee:0,anti_mortem_fee:1,facility_fee:1,total_amount:3,payment_status}));
-    export async function apiFetch(url:string) {
+    const accounts:any[]=[];
+    (globalThis as any).__uiOnboardingRequests=[];
+    export async function apiFetch(url:string,init:RequestInit={}) {
+      if(url.startsWith('/api/accounts')){
+        const paused=(globalThis as any).__uiOnboardingPaused===true;
+        const respond=(body:unknown)=>new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+        if(url==='/api/accounts/settings')return respond({enabled:true,canManageAccounts:!paused,staffInspectorAvailable:!paused,canDeactivate:true,municipalScopeId:'UI-SCOPE',municipalityName:'Synthetic UI municipality'});
+        if(url==='/api/accounts/vendors')return respond({items:[{id:'UI-BUSINESS',name:'Synthetic UI business',marketName:'Test market',marketSection:'Test section',stallNumber:'TEST'}],nextCursor:null});
+        if(init.method==='POST'){
+          const body=JSON.parse(String(init.body||'{}'));
+          (globalThis as any).__uiOnboardingRequests.push({url,body});
+          if(url==='/api/accounts')accounts.push({...body,uid:'UI-'+accounts.length,status:body.role==='vendor'?'active':'pending',invitationStatus:'sent'});
+          else {const account=accounts.find(a=>url.includes('/'+a.uid+'/'));if(account&&url.endsWith('/permissions'))account.staffPermissions=body.staffPermissions;if(account&&url.endsWith('/activate'))account.status='active';}
+          return respond({message:'Synthetic UI account request completed.'});
+        }
+        return respond({items:accounts,nextCursor:null});
+      }
       const body=url.startsWith('/api/service-fees')?{fee_config:[],configured:true}:url.startsWith('/api/dashboard')?{}:{items:url.startsWith('/api/invoices')?invoices:[],nextCursor:null};
       return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
     }`);
@@ -67,6 +83,54 @@ try {
     assert.equal(brand.background,'rgb(194, 65, 12)');
     assert.equal(brand.color,'rgb(255, 255, 255)');
     // Header menu must remain above animated pages, including early in entrance.
+    if(width===1280 && !dark && !paused){
+      await page.getByRole('navigation',{name:'Primary'}).getByRole('link',{name:'Mobile Users',exact:true}).click();
+      const accountForm=page.locator('form').filter({has:page.getByRole('heading',{name:"2. Create the person's account",exact:true})});
+      await accountForm.waitFor();
+      assert.equal(await accountForm.locator('input[type=password]').count(),0);
+      for(const [persona,role] of [['vendor','vendor'],['inventory','staff'],['billing','staff'],['delivery','staff'],['inspector','inspector']]){
+        await accountForm.getByLabel('Portal role').selectOption(role);
+        await accountForm.getByLabel('Full name',{exact:true}).fill('Synthetic '+persona);
+        await accountForm.getByLabel('Email address',{exact:true}).fill(persona+'@ui.example.test');
+        if(role==='vendor')await accountForm.getByLabel(/^Vendor business/).selectOption('UI-BUSINESS');
+        if(role==='staff'){
+          assert.equal(await accountForm.locator('input[type=checkbox]:checked').count(),0);
+          await accountForm.getByLabel(persona[0].toUpperCase()+persona.slice(1),{exact:true}).check();
+        }
+        await accountForm.getByRole('button',{name:'Create account and send invitation',exact:true}).click();
+        const card=page.locator('article').filter({has:page.getByText(persona+'@ui.example.test',{exact:true})});
+        await card.waitFor();
+        assert.match(await card.innerText(),role==='vendor'?/vendor · active/:new RegExp(role+' · pending'));
+        if(role!=='vendor'){
+          if(role==='staff'){
+            await card.getByRole('button',{name:'Save staff functions',exact:true}).click();
+            await card.getByRole('status').waitFor();
+            assert.match(await card.innerText(),/staff · pending/);
+          }
+          page.once('dialog',dialog=>dialog.accept());
+          await card.getByRole('button',{name:'Activate mobile access',exact:true}).click();
+          await page.waitForFunction(email=>[...document.querySelectorAll('article')].some(el=>el.textContent?.includes(email)&&el.textContent.includes('· active')),persona+'@ui.example.test');
+        }
+      }
+      const submitted=await page.evaluate(()=>globalThis.__uiOnboardingRequests.filter(r=>r.url==='/api/accounts').map(r=>r.body));
+      assert.equal(submitted.length,5);
+      for(const [i,persona] of ['vendor','inventory','billing','delivery','inspector'].entries()){
+        assert.equal(submitted[i].role,i===0?'vendor':i===4?'inspector':'staff');
+        assert.deepEqual(submitted[i].staffPermissions,i>0&&i<4?[persona]:undefined);
+        assert.equal(submitted[i].vendorBusinessId,i===0?'UI-BUSINESS':undefined);
+        assert.equal(submitted[i].password,undefined);
+      }
+      await page.evaluate(()=>{globalThis.__uiOnboardingPaused=true;});
+      await page.getByRole('navigation',{name:'Primary'}).getByRole('link',{name:'Vendors',exact:true}).click();
+      await page.getByRole('navigation',{name:'Primary'}).getByRole('link',{name:'Mobile Users',exact:true}).click();
+      await page.getByRole('button',{name:'History',exact:true}).first().waitFor();
+      assert.equal(await page.getByRole('button',{name:'Create account and send invitation',exact:true}).count(),0);
+      assert.equal(await page.getByRole('button',{name:'Save staff functions',exact:true}).count(),0);
+      assert.equal(await page.getByRole('button',{name:'Activate mobile access',exact:true}).count(),0);
+      assert.equal(await page.getByRole('button',{name:'Deactivate',exact:true}).first().isEnabled(),true);
+      console.log('PASS: real Users screen submits five least-privilege personas, preserves pending permission assignment, activates, and respects paused onboarding');
+      await page.getByRole('navigation',{name:'Primary'}).getByRole('link',{name:'Vendors',exact:true}).click();
+    }
     await page.getByRole('button',{name:'Profile menu'}).click();
     await page.getByRole('button',{name:'Sign out',exact:true}).click({trial:true});
     await page.keyboard.press('Escape');

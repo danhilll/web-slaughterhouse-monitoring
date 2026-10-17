@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {connectAuthEmulator,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'firebase/auth';
+import {confirmPasswordReset,connectAuthEmulator,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'firebase/auth';
 import {auth,app} from '../src/firebase';
 import {OperationsPage} from '../src/OperationsPage';
 import {UsersPage} from '../src/UsersPage';
@@ -8,6 +8,22 @@ import {AnimalsPage} from '../src/AnimalsPage';
 import '../src/index.css';
 if(!import.meta.env.DEV||app?.options.projectId!=='demo-mobile-rehearsal'||!['127.0.0.1','localhost'].includes(location.hostname)||!auth)throw Error('The demo UI requires an isolated local demo configuration.');
 connectAuthEmulator(auth,'http://127.0.0.1:9199',{disableWarnings:false});
+function PasswordSetup(){
+  const [code,setCode]=useState(''),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState('');
+  const [message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+  return <details className="rounded-2xl border bg-white p-5"><summary>Local password setup</summary><form className="mt-4 space-y-3" onSubmit={event=>{
+    event.preventDefault();setMessage('');
+    if(password!==confirmation){setMessage('Passwords must match.');return;}
+    setBusy(true);
+    void confirmPasswordReset(auth!,code,password).then(()=>{setCode('');setPassword('');setConfirmation('');setMessage('Local password setup complete.');}).catch(()=>setMessage('Password setup failed. Check the invitation code and local Auth service.')).finally(()=>setBusy(false));
+  }}>
+    <p>Use only a fresh local emulator invitation. Values are sent through Firebase password setup and are never placed in the URL.</p>
+    <label className="block">Setup action code<input className="input mt-1 w-full" type="password" autoComplete="off" required value={code} onChange={event=>setCode(event.target.value)}/></label>
+    <label className="block">New password<input className="input mt-1 w-full" type="password" autoComplete="new-password" minLength={6} required value={password} onChange={event=>setPassword(event.target.value)}/></label>
+    <label className="block">Confirm new password<input className="input mt-1 w-full" type="password" autoComplete="new-password" minLength={6} required value={confirmation} onChange={event=>setConfirmation(event.target.value)}/></label>
+    <button className="btn-primary" disabled={busy}>Set local password</button>{message&&<p role="status">{message}</p>}
+  </form></details>;
+}
 function Demo(){
   const [uid,setUid]=useState<string|null>(null),[error,setError]=useState('');
   const [page,setPage]=useState('users');
@@ -17,6 +33,7 @@ function Demo(){
       <nav aria-label="Rehearsal screens" className="flex gap-3">{['users','animals','operations'].map(value=><button key={value} className="btn-secondary" aria-pressed={page===value} onClick={()=>setPage(value)}>{value==='users'?'Mobile users':value==='animals'?'Animals':'Workflow history'}</button>)}</nav>
       {page==='users'?<UsersPage/>:page==='animals'?<AnimalsPage/>:<OperationsPage/>}
     </>:<section className="rounded-2xl border bg-white p-6"><p>Open the administrator demo history with its public synthetic account.</p><button className="btn-primary mt-4" onClick={()=>{setError('');void signInWithEmailAndPassword(auth!,'web-admin@rehearsal.example.test','Synthetic-only-42!').catch(()=>setError('Demo login failed. Check the local Auth service.'));}}>Open demo administrator history</button>{error&&<p role="alert" className="mt-3 text-red-700">{error}</p>}</section>}
+    <PasswordSetup/>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<Demo/>);

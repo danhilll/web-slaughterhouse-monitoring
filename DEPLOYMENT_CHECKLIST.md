@@ -214,6 +214,30 @@ Owner enabled Safari Apple Events inspection and prepared the approved deployed 
 
 No failed application check was observed in this run. Vendor own-profile/invoice deployed acceptance remains separate from the user-observed Android emulator evidence. Physical-device, page-boundary/detail/history, isolation and operational-write acceptance items remain open.
 
+**Single repeatable real-screen rehearsal**
+
+ALL_ROLE_DEMO.md starts with the current supported-onboarding procedure and a shared 60-minute handoff sequence; older reserved-fixture runs are explicitly historical. It reuses the existing guarded web panel, Android adapters and missing-only fixture tools. On 2026-10-17, run `flow-1792172121150` created two fictional businesses and six fresh actors through actual Users forms, completed private password setup and reviewed staff/inspector activation. Private checks verified active SCOPE-A memberships, single staff functions, vendor links, municipal claims and all six mobile profiles HTTP 200. The existing demo panel now has a masked Firebase `confirmPasswordReset` form because the installed emulator action endpoint offered only password-in-URL JSON instructions. Typecheck/build and four rehearsal safety tests passed after that change. No password/OOB/token is recorded in evidence.
+
+**Historical intermediate checkpoint (superseded by the completion/reconciliation result below):** Android acknowledged emulator-5554 / Pixel_10_Pro readiness, installed the hash-verified patched rehearsal APK without clearing app data and received explicit protected-file handoff. Real Android screens passed fresh Pig registration at 85001 grams, current-revision inspector approval, carcass 60001 grams/revision 1, one synthetic PHP 95 invoice, mandatory-receipt full cash payment, delivery self-assignment and in-transit status. At that point, controlled tracking was on hold: a position/open map appeared outside the recorded grant/GPS/map driver steps. Android initially stopped publishing, but later observed sharing active again; normal Stop/lifecycle acceptance was then unverified. It force-stopped only the rehearsal package while preserving data; the rehearsal process was confirmed absent and the retained position was unchanged over a five-second observation. This is containment evidence, not durable-stop acceptance. No outstanding driver was found then; manual/single-controller clarification was pending at that point. At that intermediate checkpoint, delivery completion, vendor A/B isolation and final web reconciliation were unverified; their later scoped passes are recorded below. See ALL_ROLE_DEMO.md for the exact resumable checkpoint; no reset/reassignment was performed. Stale web 5004/5174 and subsequently Android-owned adapter 5003 were reloaded with their existing isolated configurations/carcass option; 5003 retained `--preserve-fixtures`. All six fresh roles' effective animal/operations capabilities then matched least privilege, including explicit payment/tracking booleans. Auth/Firestore/5002 processes remained intact. Reload verification found all 223 Firestore documents unchanged and no Auth identity additions/removals; six fresh actors' full Auth hashes changed during overlapping acknowledged verification sign-ins, so full Auth byte-equality is not claimed. Details are in ALL_ROLE_DEMO.md. No reset, duplicate repository fixture helper, production change, commit, push or deployment occurred. Fresh local onboarding does not establish production mailbox delivery, physical-device acceptance or completion of the full operational flow.
+
+Actual web account History reads passed for all six fresh actors, including provisioning and four reviewed activation histories. Normal demo Sign out cleared the workspace and a fresh token-free account-settings request returned 401. No prior token was reused for logout verification. This is separate local evidence; deployed administrator acceptance above remains unchanged.
+
+
+Current evidence-backed status: the existing six fresh web-created actors completed synthetic mobile
+access and the linked inventory/inspection/billing/delivery flow. Delivered revision 5, the single
+completion audit event, Vendor A reads, Vendor B exact-invoice isolation and controlled web
+reconciliation/logout passed as detailed in ALL_ROLE_DEMO.md and the committed preserve-mode
+result below. Only the reserved synthetic administrator uses the public demo credential; fresh-actor
+passwords/action codes remain protected and are not evidence/publication artifacts. No new workflow
+or device action is authorized by this record.
+
+Vendor A's UI animal-label assertion remains unverified. Tracking timing/concurrency limits, original
+incident uncertainty, both unexplained reserved-administrator Auth hash differences, physical-device
+and pending-account-denial acceptance, mailbox delivery, production account/mobile-login evidence,
+activation/email-verification/recovery responsibilities and runtime user-create IAM remain open.
+No full Auth-equality, universal tracking correctness or production-readiness claim is made. Production
+policies/gates, unresolved security advisories and signing/release requirements remain unchanged.
+
 ## Local web rehearsal preserve-mode restoration — 17 October 2026
 
 This result supersedes the historical completion/reconciliation-pending statements above and in

@@ -23,7 +23,7 @@ async function fixture(t, options = {}) {
     vendors: async () => [{ id: 'VEN-A', name: 'Synthetic vendor' }],
     audit: async () => [],
     prepare: async a => { if([...state.accounts.values()].some(x=>x.email===a.email))throw Object.assign(Error('Already reserved'),{status:409});state.accounts.set(a.uid,{...a}); },
-    provision: async a => { state.accounts.set(a.uid, { ...a }); state.memberships.set(a.uid, { role:a.role, municipalScopeId:a.municipalScopeId, ...(a.staffPermissions ? {staffPermissions:a.staffPermissions} : {}), status: 'pending' }); state.profiles.set(a.uid,{email:a.email,role:a.role,municipalScopeId:a.municipalScopeId,status:'pending'}); },
+    provision: async a => { state.accounts.set(a.uid, { ...a }); state.memberships.set(a.uid, { role:a.role, municipalScopeId:a.municipalScopeId, ...(a.staffPermissions ? {staffPermissions:a.staffPermissions} : {}), ...(a.vendorBusinessId ? {vendorBusinessId:a.vendorBusinessId} : {}), status: 'pending' }); state.profiles.set(a.uid,{email:a.email,role:a.role,municipalScopeId:a.municipalScopeId,status:'pending'}); },
     recordFailure: async a => state.accounts.set(a.uid, { ...a, status: 'provisioning_failed' }),
     staffPermissions: async(uid, permissions) => { state.accounts.get(uid).staffPermissions=permissions;state.memberships.get(uid).staffPermissions=permissions; },
     reserveInvitation: async (uid, actor, at) => {
@@ -247,4 +247,39 @@ test('production activation capability is independent of account onboarding',asy
   assert.equal((await call('/missing/activate','POST',{})).status,404);
   assert.equal((await call('/missing/ACTIVATE/','POST',{})).status,404);
   assert.equal((await call('','POST',form)).status,503);
+});
+
+test('all five onboarding personas retain least privilege, scope, business ownership and unrelated claims through activation', async t => {
+  const { call, state } = await fixture(t);
+  for (const [persona, role, permissions] of [
+    ['vendor', 'vendor', []], ['inventory', 'staff', ['inventory']],
+    ['billing', 'staff', ['billing']], ['delivery', 'staff', ['delivery']],
+    ['inspector', 'inspector', []],
+  ]) {
+    const payload = { fullName: `Synthetic ${persona}`, email: `${persona}@example.test`, role,
+      ...(role === 'vendor' ? { vendorBusinessId: 'VEN-A' } : {}),
+      ...(role === 'staff' ? { staffPermissions: permissions } : {}) };
+    const created = await call('', 'POST', payload);
+    assert.equal(created.status, 201);
+    const uid = created.body.account.uid;
+    const identity = state.users.get(uid);
+    const membership = state.memberships.get(uid);
+    assert.deepEqual(identity.customClaims, { preserved: true, municipalRole: role, municipalScopeId: 'SCOPE-A' });
+    assert.equal(membership.municipalScopeId, 'SCOPE-A');
+    assert.equal(membership.role, role);
+    assert.deepEqual(membership.staffPermissions || [], permissions);
+    assert.equal(created.body.account.status, role === 'vendor' ? 'active' : 'pending');
+    assert.equal(membership.status, role === 'vendor' ? 'active' : 'pending');
+    assert.equal(created.body.account.vendorBusinessId, role === 'vendor' ? 'VEN-A' : undefined);
+    assert.equal(membership.vendorBusinessId, role === 'vendor' ? 'VEN-A' : undefined);
+    assert.ok(!JSON.stringify(created.body).includes(identity.password));
+    for (const field of ['password', 'oobCode', 'oobLink', 'resetLink']) assert.equal(created.body.account[field], undefined);
+    const before = structuredClone(identity);
+    if (role !== 'vendor') {
+      assert.equal((await call(`/${uid}/activate`, 'POST', {})).status, 200);
+      assert.equal(membership.status, 'active');
+      assert.deepEqual(state.users.get(uid), before);
+      assert.deepEqual(state.memberships.get(uid).staffPermissions || [], permissions);
+    }
+  }
 });
