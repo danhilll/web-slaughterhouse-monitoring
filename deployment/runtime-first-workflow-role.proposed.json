@@ -1,0 +1,15 @@
+{
+  "title": "Municipal first workflow runtime",
+  "description": "PROPOSAL ONLY: existing runtime read/deactivation permissions plus Auth user creation for reviewed onboarding. No IAM assignment performed.",
+  "stage": "GA",
+  "includedPermissions": [
+    "datastore.databases.get",
+    "datastore.entities.get",
+    "datastore.entities.list",
+    "datastore.entities.create",
+    "datastore.entities.update",
+    "firebaseauth.users.get",
+    "firebaseauth.users.update",
+    "firebaseauth.users.create"
+  ]
+}

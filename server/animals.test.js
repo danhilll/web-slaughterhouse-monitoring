@@ -69,6 +69,36 @@ test('weight, species, identifier, scope injection and wrong ownership are valid
 test('normalized identifiers cannot be registered twice',async t=>{
   const {call}=await fixture(t);assert.equal((await call('','inventory','POST',input)).status,201);assert.equal((await call('','inventory','POST',{...input,identifier:' tag-001 '})).status,409);
 });
+test('production animal reads reject missing mobile audit fields without changing stored records',async t=>{
+  const production={municipalScopeId:'SCOPE-A',features:{animals:true,inspection:true,carcass:false}};
+  const {call,state}=await fixture(t,true,production);
+  const created=(await call('','inventory','POST',input)).body;
+  const original=structuredClone(state.animals.get(created.id));
+  for(const field of ['createdAt','createdBy','updatedAt','updatedBy']){
+    const broken=structuredClone(original);delete broken[field];state.animals.set(created.id,broken);
+    const before=structuredClone(broken),events=state.events.length;
+    const list=await call('','inspector');
+    assert.equal(list.status,503,`list must reject missing ${field}`);
+    assert.deepEqual(list.body,{message:'Animal records require administrator review.'});
+    const detail=await call(`/${created.id}`,'inspector');
+    assert.equal(detail.status,503,`detail must reject missing ${field}`);
+    assert.deepEqual(detail.body,{message:'Animal record requires administrator review.'});
+    assert.deepEqual(state.animals.get(created.id),before);assert.equal(state.events.length,events);
+  }
+  state.animals.set(created.id,original);
+  assert.equal((await call('','inspector')).status,200);
+  const approved=await call(`/${created.id}/inspection`,'inspector','POST',{decision:'approved',expectedRevision:1,notes:'Identity and current animal reviewed'});
+  assert.equal(approved.status,200);assert.equal(approved.body.createdBy,'inventory');assert.equal(approved.body.updatedBy,'inspector');
+  const complete=structuredClone(state.animals.get(created.id));
+  for(const field of ['inspectorUid','decidedAt','notes']){
+    const broken=structuredClone(complete);delete broken.inspection[field];state.animals.set(created.id,broken);
+    assert.equal((await call('','inspector')).status,503,`list must reject missing inspection.${field}`);
+    assert.equal((await call(`/${created.id}`,'inspector')).status,503,`detail must reject missing inspection.${field}`);
+    assert.deepEqual(state.animals.get(created.id),broken);
+  }
+  state.animals.set(created.id,complete);
+  assert.equal((await call('','inspector')).status,200);
+});
 test('inventory vendor selection is scoped, bounded and excludes contact details',async t=>{
   const {call}=await fixture(t);const result=await call('/vendors');assert.equal(result.status,200);assert.deepEqual(result.body.items,[{id:'VEN-A',name:'Synthetic vendor'}]);
   for(const token of ['billing','delivery','alice','inspector'])assert.equal((await call('/vendors',token)).status,403);

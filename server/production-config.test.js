@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { loadProductionConfig, assertProductionProject } from './production-config.js';
 import { createAnimalRouter } from './animals.js';
 import { createOperationsRouter } from './operations.js';
@@ -10,6 +11,18 @@ const fixture = () => ({
   manifest:{version:1,mode:'production',projectId:'municipal-fixture',municipalScopeId:'SCOPE',apiOrigin:'https://api.example.test',features:{}}
 });
 const load = ({env,manifest}) => loadProductionConfig(env,()=>manifest);
+test('proposed first workflow enables only its four independent gates and rollback preserves cursor identity',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../deployment/first-workflow.proposed.json',import.meta.url),'utf8'));
+  const rollback=JSON.parse(readFileSync(new URL('../deployment/production-release.json',import.meta.url),'utf8'));
+  const f=fixture();
+  f.env={...f.env,FIREBASE_PROJECT_ID:manifest.projectId,VITE_FIREBASE_PROJECT_ID:manifest.projectId,
+    MUNICIPAL_SCOPE_ID:manifest.municipalScopeId,VITE_FIREBASE_API_KEY:'test-public-key',
+    ACCOUNT_MANAGEMENT_ENABLED:'false',ANIMAL_WORKFLOW_ENABLED:'false',ANIMAL_OPERATIONS_ENABLED:'false'};
+  const active=load({...f,manifest}),paused=load({...f,manifest:rollback});
+  assert.deepEqual(Object.entries(active.features).filter(([,v])=>v).map(([k])=>k),['accountManagement','activation','animals','inspection']);
+  assert.ok(Object.values(paused.features).every(v=>v===false));
+  for(const domain of ['animals','mobile','web-lists'])assert.deepEqual(active.cursorSecret(domain),paused.cursorSecret(domain));
+});
 test('production features default off, remain independent, and ignore legacy rehearsal write flags',()=>{
   const f=fixture();f.env.ACCOUNT_MANAGEMENT_ENABLED='true';f.env.ANIMAL_WORKFLOW_ENABLED='true';f.env.ANIMAL_OPERATIONS_ENABLED='true';
   const config=load(f);assert.ok(Object.values(config.features).every(v=>v===false));

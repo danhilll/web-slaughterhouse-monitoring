@@ -92,8 +92,10 @@ test('carcass validation rejects fractional grams, unsafe values, extra fields, 
 
 test('carcass writes require current approval and reject invoiced/dispatched or stale records',async t=>{
   const f=await fixture(t);
-  for(const inspection of [{status:'pending',revision:1},{status:'rejected',revision:1}]){f.animal().inspection=inspection;assert.equal((await f.call()).status,409);}
-  f.animal().inspection={status:'approved',revision:1};
+  const approved={...f.animal().inspection};
+  // Keep completed-decision evidence valid while testing the eligibility gate.
+  for(const inspection of [{status:'pending',revision:1},{...approved,status:'rejected'}]){f.animal().inspection=inspection;assert.equal((await f.call()).status,409);}
+  f.animal().inspection=approved;
   assert.equal((await f.call({body:{...input,expectedRevision:2}})).status,409);
   for(const key of ['billingInvoiceId','deliveryId']){f.animal()[key]='LINK';assert.equal((await f.call()).status,409);delete f.animal()[key];}
   assert.equal((await f.call()).status,200);
