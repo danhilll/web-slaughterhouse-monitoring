@@ -1,0 +1,9 @@
+export type CarcassEstimate = { weightGrams: number; liveWeightGrams: number; animalRevision: number;
+  rule: 'manager_80_percent_v1'; rounding: 'nearest_gram_half_up' };
+export type CarcassWeightSelection = { source: 'measured' | 'estimated'; weightGrams: number;
+  animalRevision: number; requiresReview: boolean };
+export const CARCASS_ESTIMATE_RULE: 'manager_80_percent_v1';
+export const CARCASS_ESTIMATE_ROUNDING: 'nearest_gram_half_up';
+export function estimateCarcassWeight(liveWeightGrams: number, animalRevision: number): CarcassEstimate;
+export function validCarcassEstimate(estimate: unknown, liveWeightGrams: number, animalRevision: number): boolean;
+export function selectCarcassWeight(animal: { revision: number; carcassWeight?: { weightGrams: number; animalRevision: number } | null }, estimate: CarcassEstimate): CarcassWeightSelection;

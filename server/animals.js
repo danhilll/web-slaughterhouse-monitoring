@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
+import { estimateCarcassWeight, validCarcassEstimate, selectCarcassWeight } from '../shared/carcassEstimate.js';
 import { EMAIL_VERIFICATION_REQUIRED, verifyFirebaseIdToken } from './access.js';
 
 export const STAFF_PERMISSIONS = ['inventory', 'billing', 'delivery'];
@@ -12,12 +13,15 @@ const timestamp = v => typeof v === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(v)
 export const animalBillingEligible = a => a.inspection?.status === 'approved' && a.inspection.revision === a.revision;
 const carcassKeys = ['weightGrams','weighedAt','revision','animalRevision','recordedAt','recordedBy'];
 const validCarcass = c => c == null || (Number.isSafeInteger(c.weightGrams) && c.weightGrams > 0 && timestamp(c.weighedAt) && Number.isSafeInteger(c.revision) && c.revision > 0 && Number.isSafeInteger(c.animalRevision) && c.animalRevision > 0 && timestamp(c.recordedAt) && validId(c.recordedBy));
-const view = a => ({...Object.fromEntries(['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','createdBy','updatedAt','updatedBy'].map(k => [k,a[k]])),inspection:Object.fromEntries(['status','revision','inspectorUid','decidedAt','notes'].filter(k=>a.inspection?.[k]!==undefined).map(k=>[k,a.inspection[k]])),carcassWeight:a.carcassWeight?Object.fromEntries(carcassKeys.map(k=>[k,a.carcassWeight[k]])):null,carcassWeightLocked:Boolean(a.billingInvoiceId||a.deliveryId)});
+const view = a => {
+  const carcassEstimate = a.carcassEstimate ?? estimateCarcassWeight(a.weightGrams,a.revision);
+  return ({...Object.fromEntries(['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','createdBy','updatedAt','updatedBy'].map(k => [k,a[k]])),inspection:Object.fromEntries(['status','revision','inspectorUid','decidedAt','notes'].filter(k=>a.inspection?.[k]!==undefined).map(k=>[k,a.inspection[k]])),carcassWeight:a.carcassWeight?Object.fromEntries(carcassKeys.map(k=>[k,a.carcassWeight[k]])):null,carcassWeightLocked:Boolean(a.billingInvoiceId||a.deliveryId),carcassEstimate,carcassWeightSelection:selectCarcassWeight(a,carcassEstimate)});
+};
 const validInspection = a => ['pending','approved','rejected'].includes(a.inspection?.status) && a.inspection.revision===a.revision &&
   (a.inspection.status==='pending' || (validId(a.inspection.inspectorUid) && timestamp(a.inspection.decidedAt) && text(a.inspection.notes,INSPECTION_NOTES_MAX_LENGTH)));
 // These fields are required by the mobile record contract. Reject incomplete
 // stored records before returning a successful response; never fabricate audit evidence.
-const validRecord = a => validCarcass(a.carcassWeight) && (!a.carcassWeight || a.carcassWeight.animalRevision<=a.revision) && validId(a.id) && validId(a.municipalScopeId) && validId(a.vendorBusinessId) && ['Cow','Pig'].includes(a.species) && Number.isSafeInteger(a.weightGrams) && a.weightGrams>0 && timestamp(a.weighedAt) && text(a.identifier,80) && ['manual','rfid'].includes(a.identifierType) && Number.isSafeInteger(a.revision) && a.revision>0 && validInspection(a) && timestamp(a.createdAt) && validId(a.createdBy) && timestamp(a.updatedAt) && validId(a.updatedBy);
+const validRecord = a => validCarcassEstimate(a.carcassEstimate,a.weightGrams,a.revision) && validCarcass(a.carcassWeight) && (!a.carcassWeight || a.carcassWeight.animalRevision<=a.revision) && validId(a.id) && validId(a.municipalScopeId) && validId(a.vendorBusinessId) && ['Cow','Pig'].includes(a.species) && Number.isSafeInteger(a.weightGrams) && a.weightGrams>0 && timestamp(a.weighedAt) && text(a.identifier,80) && ['manual','rfid'].includes(a.identifierType) && Number.isSafeInteger(a.revision) && a.revision>0 && validInspection(a) && timestamp(a.createdAt) && validId(a.createdBy) && timestamp(a.updatedAt) && validId(a.updatedBy);
 const inventory = p => p.role === 'admin' || (p.role === 'staff' && p.staffPermissions.includes('inventory'));
 const readable = (a,p) => a?.municipalScopeId === p.municipalScopeId && (p.role !== 'vendor' || a.vendorBusinessId === p.vendorBusinessId);
 function validateDetails(b) {
@@ -164,7 +168,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     const b=req.body||{};if(Object.keys(b).some(k=>!['vendorBusinessId','species','weightGrams','weighedAt','identifier','identifierType'].includes(k))||!text(b.identifier,80)||!['manual','rfid'].includes(b.identifierType))throw fail(400,'Provide a manual or RFID animal identifier and supported fields.');
     const details=validateDetails(b),at=now(),identifier=b.identifier.normalize('NFKC').trim().toUpperCase();
     if(!text(identifier,80)||/[\u0000-\u001f\u007f]/.test(identifier))throw fail(400,'Use a printable animal identifier of at most 80 characters.');
-    const a={id:`ANM-${randomUUID()}`,municipalScopeId:p.municipalScopeId,...details,identifier,identifierType:b.identifierType,revision:1,inspection:{status:'pending',revision:1},createdAt:at,createdBy:p.uid,updatedAt:at,updatedBy:p.uid};
+    const a={id:`ANM-${randomUUID()}`,municipalScopeId:p.municipalScopeId,...details,identifier,identifierType:b.identifierType,revision:1,carcassEstimate:estimateCarcassWeight(details.weightGrams,1),inspection:{status:'pending',revision:1},createdAt:at,createdBy:p.uid,updatedAt:at,updatedBy:p.uid};
     await store.create(a,p);res.status(201).json(view(a));
   }));
   router.post('/:id/correction',writeGate('animals'),run(async(req,res)=>{
@@ -174,7 +178,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     const result=await store.mutate(req.params.id,p,a=>{
       if(!validId(req.params.id)||a.revision!==b.expectedRevision)throw fail(409,'This record changed. Refresh before correcting it.');
       if(a.billingInvoiceId||a.deliveryId)throw fail(409,'A billed or dispatched animal requires a controlled reversal before correction.');
-      const revision=a.revision+1;return {after:{...a,...details,revision,inspection:{status:'pending',revision},updatedAt:now(),updatedBy:p.uid},action:'corrected',reason:b.reason.trim()};
+      const revision=a.revision+1;return {after:{...a,...details,revision,carcassEstimate:estimateCarcassWeight(details.weightGrams,revision),inspection:{status:'pending',revision},updatedAt:now(),updatedBy:p.uid},action:'corrected',reason:b.reason.trim()};
     });res.json(view(result));
   }));
   router.post('/:id/inspection',writeGate('inspection'),run(async(req,res)=>{
@@ -202,7 +206,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
       if(a.billingInvoiceId||a.deliveryId)throw fail(409,'Carcass weight cannot change after invoicing or dispatch.');
       if(a.carcassWeight&&!text(b.reason,500))throw fail(400,'A reason is required to correct carcass weight.');
       const carcassWeight={weightGrams:b.weightGrams,weighedAt:new Date(b.weighedAt).toISOString(),revision:b.expectedCarcassRevision+1,animalRevision:a.revision,recordedAt:at,recordedBy:p.uid};
-      return {after:{...a,carcassWeight,updatedAt:at,updatedBy:p.uid},action:a.carcassWeight?'carcass_weight_corrected':'carcass_weight_recorded',reason:b.reason?.trim()||''};
+      return {after:{...a,carcassEstimate:a.carcassEstimate??estimateCarcassWeight(a.weightGrams,a.revision),carcassWeight,updatedAt:at,updatedBy:p.uid},action:a.carcassWeight?'carcass_weight_corrected':'carcass_weight_recorded',reason:b.reason?.trim()||''};
     });res.json(view(result));
   }));
   router.use((req,res)=>res.status(405).json({message:'Animal operation is unavailable. Records are not deleted.'}));

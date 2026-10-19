@@ -4,6 +4,7 @@ import express from 'express';
 import {createAnimalStore,createAnimalRouter,createAnimalMobileAuth} from './animals.js';
 import {createWebAdminMiddleware} from './access.js';
 import {createOperationsStore} from './operations.js';
+import {estimateCarcassWeight} from '../shared/carcassEstimate.js';
 
 const at='2026-10-15T06:00:00.000Z';
 const input={weightGrams:65001,weighedAt:at,expectedRevision:1,expectedCarcassRevision:0};
@@ -48,7 +49,7 @@ test('carcass first entry and correction preserve live weight, animal revision a
   const f=await fixture(t),original=structuredClone(f.animal());
   const first=await f.call();assert.equal(first.status,200);
   assert.deepEqual(first.body.carcassWeight,{weightGrams:65001,weighedAt:at,revision:1,animalRevision:1,recordedAt:at,recordedBy:'inventory'});
-  assert.deepEqual(f.animal(),{...original,carcassWeight:first.body.carcassWeight,updatedAt:at,updatedBy:'inventory'});
+  assert.deepEqual(f.animal(),{...original,carcassEstimate:first.body.carcassEstimate,carcassWeight:first.body.carcassWeight,updatedAt:at,updatedBy:'inventory'});
   assert.equal(f.events()[0].before.carcassWeight,null);assert.deepEqual(f.events()[0].after.carcassWeight,first.body.carcassWeight);
   const result=await f.call({who:'ADMIN',web:true,body:{...input,weightGrams:66002,expectedCarcassRevision:1,reason:' Corrected scale entry '}});
   assert.equal(result.status,200);assert.equal(result.body.carcassWeight.revision,2);assert.equal(result.body.carcassWeight.recordedBy,'ADMIN');
@@ -143,4 +144,63 @@ test('invalid stored carcass data fails closed rather than being silently repair
   const f=await fixture(t);await f.call();f.animal().carcassWeight.weightGrams=1.5;
   assert.equal((await f.call({method:'GET',suffix:'/ANM-A'})).status,503);
   assert.equal((await f.call({body:{...input,expectedCarcassRevision:1,reason:'Correction'}})).status,503);assert.equal(f.events().length,1);
+});
+
+test('legacy estimate reads are timestamp-free and do not migrate or fabricate measurements',async t=>{
+  const f=await fixture(t,{gate:false});const original=structuredClone([...f.rows]);
+  const response=await f.call({method:'GET',suffix:'/ANM-A'});
+  assert.equal(response.status,200);
+  assert.deepEqual(response.body.carcassEstimate,{weightGrams:68001,liveWeightGrams:85001,animalRevision:1,rule:'manager_80_percent_v1',rounding:'nearest_gram_half_up'});
+  assert.deepEqual(response.body.carcassWeightSelection,{source:'estimated',weightGrams:68001,animalRevision:1,requiresReview:false});
+  assert.equal(response.body.carcassWeight,null);
+  assert.deepEqual([...f.rows],original);
+  assert.equal((await f.call()).status,503);assert.equal(f.events().length,0);
+});
+
+test('Cow and Pig registrations preserve estimated grams and revision in atomic audit snapshots',async t=>{
+  for(const species of ['Cow','Pig']){
+    const f=await fixture(t);
+    const result=await f.call({suffix:'/',body:{identifier:'NEW-'+species,identifierType:'manual',vendorBusinessId:'VEN-A',species,weightGrams:85001,weighedAt:at}});
+    assert.equal(result.status,201);
+    const stored=f.rows.get('animal_records/'+result.body.id);
+    assert.deepEqual(stored.carcassEstimate,estimateCarcassWeight(85001,1));
+    assert.equal(stored.carcassWeight,undefined);
+    const audit=f.events()[0];assert.equal(audit.action,'registered');assert.deepEqual(audit.after.carcassEstimate,stored.carcassEstimate);
+    assert.equal(audit.after.carcassWeight,null);assert.equal(result.body.carcassWeightSelection.source,'estimated');
+    assert.equal((await f.call({method:'GET',suffix:'/'+result.body.id})).body.carcassEstimate.weightGrams,68001);
+  }
+});
+
+test('measured carcass takes precedence while estimate survives first entry and reasoned correction',async t=>{
+  const f=await fixture(t);const expected=estimateCarcassWeight(85001,1);
+  const first=await f.call();assert.equal(first.status,200);assert.deepEqual(first.body.carcassEstimate,expected);
+  assert.deepEqual(first.body.carcassWeightSelection,{source:'measured',weightGrams:65001,animalRevision:1,requiresReview:false});
+  assert.deepEqual(f.animal().carcassEstimate,expected);
+  const corrected=await f.call({body:{...input,weightGrams:66002,expectedCarcassRevision:1,reason:'Scale correction'}});
+  assert.equal(corrected.status,200);assert.deepEqual(corrected.body.carcassEstimate,expected);assert.equal(corrected.body.carcassWeightSelection.weightGrams,66002);
+  assert.deepEqual(f.events()[1].before.carcassEstimate,expected);assert.deepEqual(f.events()[1].after.carcassEstimate,expected);
+  assert.equal(f.events()[1].reason,'Scale correction');assert.equal(corrected.body.carcassWeight.revision,2);
+});
+
+test('live corrections advance estimate revision and retain historical actual and estimate in audit',async t=>{
+  const f=await fixture(t);const measured=(await f.call()).body.carcassWeight;
+  const oldEstimate=structuredClone(f.animal().carcassEstimate);
+  const corrected=await f.call({suffix:'/ANM-A/correction',body:{vendorBusinessId:'VEN-A',species:'Cow',weightGrams:86000,weighedAt:at,expectedRevision:1,reason:'Live weighing corrected'}});
+  assert.equal(corrected.status,200);assert.deepEqual(corrected.body.carcassEstimate,estimateCarcassWeight(86000,2));
+  assert.deepEqual(corrected.body.carcassWeight,measured);
+  assert.deepEqual(corrected.body.carcassWeightSelection,{source:'measured',weightGrams:measured.weightGrams,animalRevision:1,requiresReview:true});
+  const audit=f.events().at(-1);assert.deepEqual(audit.before.carcassEstimate,oldEstimate);assert.deepEqual(audit.after.carcassEstimate,corrected.body.carcassEstimate);
+  assert.equal(corrected.body.inspection.status,'pending');assert.equal(corrected.body.inspection.revision,2);
+  assert.equal((await f.call({body:{...input,expectedRevision:2,expectedCarcassRevision:1,reason:'Needs reinspection'}})).status,409);
+});
+
+test('estimates cannot be submitted as measurement metadata and inconsistent stored estimates fail closed',async t=>{
+  const f=await fixture(t);
+  for(const patch of [{source:'estimated'},{carcassEstimate:estimateCarcassWeight(85001,1)},{estimated:true}]){
+    assert.equal((await f.call({body:{...input,...patch}})).status,400);
+  }
+  f.animal().carcassEstimate={...estimateCarcassWeight(85001,1),weightGrams:1};
+  const snapshot=structuredClone(f.animal());
+  assert.equal((await f.call({method:'GET',suffix:'/ANM-A'})).status,503);
+  assert.equal((await f.call()).status,503);assert.deepEqual(f.animal(),snapshot);assert.equal(f.events().length,0);
 });
