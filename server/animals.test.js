@@ -117,6 +117,88 @@ test('single inspector decision requires verification notes; administrator and i
   const r=await call(`/${a.id}/inspection`,'inspector','POST',decision);assert.equal(r.status,200);assert.equal(r.body.inspection.inspectorUid,'inspector');assert.equal(animalBillingEligible(r.body),true);
   assert.equal((await call(`/${a.id}/inspection`,'inspector','POST',decision)).status,409);
 });
+for (const decision of ['approved', 'rejected']) {
+  for (const length of [500, 501, 1000]) {
+    test(`inspection ${decision} notes of ${length} characters survive write and protected reads`, async t => {
+      const { call, state } = await fixture(t);
+      const created = await call('', 'inventory', 'POST', input);
+      assert.equal(created.status, 201);
+      const animal = created.body;
+      const notes = 'N'.repeat(length);
+      const written = await call(`/${animal.id}/inspection`, 'inspector', 'POST', {
+        decision, expectedRevision: animal.revision, notes
+      });
+      assert.equal(written.status, 200);
+      assert.equal(written.body.revision, animal.revision);
+      assert.deepEqual(written.body.inspection, {
+        status: decision, revision: animal.revision, inspectorUid: 'inspector',
+        decidedAt: written.body.inspection.decidedAt, notes
+      });
+      assert.ok(Number.isFinite(Date.parse(written.body.inspection.decidedAt)));
+      assert.equal(state.events.length, 2);
+      assert.equal(state.events.at(-1).action, `inspection_${decision}`);
+      assert.equal(state.events.at(-1).reason, notes);
+      assert.deepEqual(state.events.at(-1).after.inspection, written.body.inspection);
+      for (const [path, token, web] of [
+        [`/${animal.id}`, 'inspector', false], [`/${animal.id}`, 'alice', false],
+        [`/${animal.id}`, 'ADMIN', true]
+      ]) {
+        const read = await call(path, token, 'GET', undefined, web);
+        assert.equal(read.status, 200);
+        assert.deepEqual(read.body.inspection, written.body.inspection);
+      }
+      const listed = await call('', 'inventory');
+      assert.equal(listed.status, 200);
+      assert.deepEqual(listed.body.items[0].inspection, written.body.inspection);
+      assert.equal((await call(`/${animal.id}/vendor`, 'inspector')).status, 200);
+      const history = await call(`/${animal.id}/history`, 'inspector');
+      assert.equal(history.status, 200);
+      assert.equal(history.body.items.at(-1).reason, notes);
+      assert.equal((await call(`/${animal.id}/inspection`, 'inspector', 'POST', {
+        decision, expectedRevision: animal.revision, notes
+      })).status, 409);
+      assert.equal(state.events.length, 2);
+    });
+  }
+}
+for (const decision of ['approved', 'rejected']) {
+  test(`inspection ${decision} rejects 1001-character notes without changing revision or audit`, async t => {
+    const { call, state } = await fixture(t);
+    const animal = (await call('', 'inventory', 'POST', input)).body;
+    const before = structuredClone(state.animals.get(animal.id));
+    const result = await call(`/${animal.id}/inspection`, 'inspector', 'POST', {
+      decision, expectedRevision: animal.revision, notes: 'N'.repeat(1001)
+    });
+    assert.equal(result.status, 400);
+    assert.deepEqual(state.animals.get(animal.id), before);
+    assert.equal(state.events.length, 1);
+    assert.equal((await call(`/${animal.id}`, 'inspector')).status, 200);
+    // A preexisting over-limit record still fails closed; no stored data is repaired.
+    state.animals.set(animal.id, { ...before, inspection: {
+      status: decision, revision: before.revision, inspectorUid: 'inspector',
+      decidedAt: input.weighedAt, notes: 'N'.repeat(1001)
+    } });
+    assert.equal((await call(`/${animal.id}`, 'inspector')).status, 503);
+    assert.equal((await call('', 'inventory')).status, 503);
+  });
+}
+test('inspection note expansion does not expand the 500-character animal correction reason', async t => {
+  const { call, state } = await fixture(t);
+  const animal = (await call('', 'inventory', 'POST', input)).body;
+  const details = { vendorBusinessId: input.vendorBusinessId, species: input.species,
+    weightGrams: input.weightGrams, weighedAt: input.weighedAt, expectedRevision: animal.revision };
+  assert.equal((await call(`/${animal.id}/correction`, 'inventory', 'POST', {
+    ...details, reason: 'R'.repeat(501)
+  })).status, 400);
+  assert.equal(state.events.length, 1);
+  const corrected = await call(`/${animal.id}/correction`, 'inventory', 'POST', {
+    ...details, reason: 'R'.repeat(500)
+  });
+  assert.equal(corrected.status, 200);
+  assert.equal(corrected.body.revision, animal.revision + 1);
+  assert.equal(corrected.body.inspection.status, 'pending');
+  assert.equal(state.events.at(-1).reason.length, 500);
+});
 test('correction invalidates approval, records reason, and prevents stale reapproval',async t=>{
   const {call,state}=await fixture(t);const a=(await call('','inventory','POST',input)).body;
   await call(`/${a.id}/inspection`,'inspector','POST',{decision:'approved',expectedRevision:1,notes:'Verified'});

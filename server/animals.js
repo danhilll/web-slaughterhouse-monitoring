@@ -4,6 +4,7 @@ import { FieldPath } from 'firebase-admin/firestore';
 import { EMAIL_VERIFICATION_REQUIRED, verifyFirebaseIdToken } from './access.js';
 
 export const STAFF_PERMISSIONS = ['inventory', 'billing', 'delivery'];
+const INSPECTION_NOTES_MAX_LENGTH = 1000;
 const validId = v => typeof v === 'string' && v.length > 0 && v.length <= 128 && v === v.trim() && !v.includes('/') && !['.', '..'].includes(v);
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const text = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= max;
@@ -13,7 +14,7 @@ const carcassKeys = ['weightGrams','weighedAt','revision','animalRevision','reco
 const validCarcass = c => c == null || (Number.isSafeInteger(c.weightGrams) && c.weightGrams > 0 && timestamp(c.weighedAt) && Number.isSafeInteger(c.revision) && c.revision > 0 && Number.isSafeInteger(c.animalRevision) && c.animalRevision > 0 && timestamp(c.recordedAt) && validId(c.recordedBy));
 const view = a => ({...Object.fromEntries(['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','createdBy','updatedAt','updatedBy'].map(k => [k,a[k]])),inspection:Object.fromEntries(['status','revision','inspectorUid','decidedAt','notes'].filter(k=>a.inspection?.[k]!==undefined).map(k=>[k,a.inspection[k]])),carcassWeight:a.carcassWeight?Object.fromEntries(carcassKeys.map(k=>[k,a.carcassWeight[k]])):null,carcassWeightLocked:Boolean(a.billingInvoiceId||a.deliveryId)});
 const validInspection = a => ['pending','approved','rejected'].includes(a.inspection?.status) && a.inspection.revision===a.revision &&
-  (a.inspection.status==='pending' || (validId(a.inspection.inspectorUid) && timestamp(a.inspection.decidedAt) && text(a.inspection.notes,500)));
+  (a.inspection.status==='pending' || (validId(a.inspection.inspectorUid) && timestamp(a.inspection.decidedAt) && text(a.inspection.notes,INSPECTION_NOTES_MAX_LENGTH)));
 // These fields are required by the mobile record contract. Reject incomplete
 // stored records before returning a successful response; never fabricate audit evidence.
 const validRecord = a => validCarcass(a.carcassWeight) && (!a.carcassWeight || a.carcassWeight.animalRevision<=a.revision) && validId(a.id) && validId(a.municipalScopeId) && validId(a.vendorBusinessId) && ['Cow','Pig'].includes(a.species) && Number.isSafeInteger(a.weightGrams) && a.weightGrams>0 && timestamp(a.weighedAt) && text(a.identifier,80) && ['manual','rfid'].includes(a.identifierType) && Number.isSafeInteger(a.revision) && a.revision>0 && validInspection(a) && timestamp(a.createdAt) && validId(a.createdBy) && timestamp(a.updatedAt) && validId(a.updatedBy);
@@ -178,7 +179,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
   }));
   router.post('/:id/inspection',writeGate('inspection'),run(async(req,res)=>{
     const p=req.animalPrincipal;if(p.role!=='inspector')throw fail(403,'Only an approved inspector can record inspection decisions.');
-    const b=req.body||{};if(Object.keys(b).some(k=>!['decision','expectedRevision','notes'].includes(k))||!['approved','rejected'].includes(b.decision)||!Number.isSafeInteger(b.expectedRevision)||!text(b.notes,1000))throw fail(400,'A decision, current revision and verification notes are required.');
+    const b=req.body||{};if(Object.keys(b).some(k=>!['decision','expectedRevision','notes'].includes(k))||!['approved','rejected'].includes(b.decision)||!Number.isSafeInteger(b.expectedRevision)||!text(b.notes,INSPECTION_NOTES_MAX_LENGTH))throw fail(400,'A decision, current revision and verification notes are required.');
     const result=await store.mutate(req.params.id,p,a=>{
       if(a.revision!==b.expectedRevision||a.inspection.status!=='pending')throw fail(409,'This revision is no longer awaiting inspection. Refresh the record.');
       return {after:{...a,inspection:{status:b.decision,revision:a.revision,inspectorUid:p.uid,decidedAt:now(),notes:b.notes.trim()},updatedAt:now(),updatedBy:p.uid},action:`inspection_${b.decision}`,reason:b.notes.trim()};
