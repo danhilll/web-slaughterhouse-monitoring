@@ -37,7 +37,7 @@ try {
   await writeFile(firebase, `export {auth} from './mock-provider'; export const isFirebaseConfigured=true;`);
   await writeFile(provider, `
     const key='router-check-user', listeners=new Set<any>();
-    const user=(uid:string)=>({uid,email:uid+'@example.test',getIdToken:async()=> 'synthetic-'+uid});
+    const user=(uid:string)=>({uid,emailVerified:true,email:uid+'@example.test',getIdToken:async()=> 'synthetic-'+uid});
     export const auth={currentUser:sessionStorage.getItem(key)?user(sessionStorage.getItem(key)!):null};
     export function onIdTokenChanged(_auth:any,callback:any){listeners.add(callback);queueMicrotask(()=>{if(listeners.has(callback))void callback(auth.currentUser);});return()=>listeners.delete(callback);}
     export async function signInWithEmailAndPassword(_auth:any,email:string,_password:string){const uid=email.startsWith('denied')?'DENIED':'ADMIN';sessionStorage.setItem(key,uid);auth.currentUser=user(uid);await Promise.all([...listeners].map(f=>f(auth.currentUser)));}

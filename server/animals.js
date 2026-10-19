@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
-import { verifyFirebaseIdToken } from './access.js';
+import { EMAIL_VERIFICATION_REQUIRED, verifyFirebaseIdToken } from './access.js';
 
 export const STAFF_PERMISSIONS = ['inventory', 'billing', 'delivery'];
 const validId = v => typeof v === 'string' && v.length > 0 && v.length <= 128 && v === v.trim() && !v.includes('/') && !['.', '..'].includes(v);
@@ -87,6 +87,7 @@ export function createAnimalStore(getDb) {
 
 export function createAnimalMobileAuth(getAuth,store) {
   return async(req,res,next)=>{
+    res.set('Cache-Control','no-store');
     const token=/^Bearer (\S+)$/i.exec(String(req.headers.authorization||''));
     if(!token)return res.status(401).json({message:'Sign in is required.'});
     try {
@@ -102,7 +103,7 @@ export function createAnimalMobileAuth(getAuth,store) {
         const v=await store.vendor(m.vendorBusinessId);if(!v||v.status!=='Active'||v.municipalScopeId!==m.municipalScopeId)throw fail(403,'Vendor assignment is unavailable.');
       }
       req.animalUser={uid:decoded.uid,role:m.role,municipalScopeId:m.municipalScopeId,staffPermissions:permissions,...(m.role==='vendor'?{vendorBusinessId:m.vendorBusinessId}:{})};next();
-    }catch(e){res.status(e.status||503).json({message:e.status&&e.status!==401?e.message:'Animal access is unavailable.'});}
+    }catch(e){if(e.code===EMAIL_VERIFICATION_REQUIRED)return res.status(403).json({code:e.code,message:e.message});res.status(e.status||503).json({message:e.status&&e.status!==401?e.message:'Animal access is unavailable.'});}
   };
 }
 

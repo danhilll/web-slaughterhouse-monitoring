@@ -2,8 +2,10 @@ import { auth } from './firebase';
 
 export const WEB_ACCESS_LOST_EVENT = 'web-admin-access-lost';
 
-function reportAccessLost(status: 401 | 403): void {
-  window.dispatchEvent(new CustomEvent(WEB_ACCESS_LOST_EVENT, { detail: status }));
+export const EMAIL_VERIFICATION_REQUIRED = 'EMAIL_VERIFICATION_REQUIRED';
+
+function reportAccessLost(status: 401 | 403, code?: string): void {
+  window.dispatchEvent(new CustomEvent(WEB_ACCESS_LOST_EVENT, { detail: code === EMAIL_VERIFICATION_REQUIRED ? { status, code } : status }));
 }
 
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
@@ -28,7 +30,11 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(input, { ...init, headers });
   if (response.status === 401 || response.status === 403) {
-    reportAccessLost(response.status);
+    let code: string | undefined;
+    if (response.status === 403) {
+      try { code = (await response.clone().json())?.code; } catch { /* Preserve the original response for its caller. */ }
+    }
+    reportAccessLost(response.status, code);
   }
   return response;
 }

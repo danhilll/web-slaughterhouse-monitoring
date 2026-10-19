@@ -21,7 +21,7 @@ try {
   const api = path.join(fixture, 'mock-api.ts');
   const firebase = path.join(fixture, 'mock-firebase.ts');
   await writeFile(firebase, 'export const auth=null; export const isFirebaseConfigured=true;');
-  await writeFile(api, `export const WEB_ACCESS_LOST_EVENT='mock-access-lost';
+  await writeFile(api, `export const WEB_ACCESS_LOST_EVENT='mock-access-lost'; export const EMAIL_VERIFICATION_REQUIRED='EMAIL_VERIFICATION_REQUIRED';
     const invoices=['Unpaid','Paid'].map(payment_status=>({id:'UI-'+payment_status,vendor_id:'UI-VENDOR',vendor_name:'Synthetic vendor',date_issued:'2026-10-16',due_date:'2026-10-16',number_of_heads_cow:0,number_of_heads_pig:1,corral_fee:1,delivery_fee:0,anti_mortem_fee:1,facility_fee:1,total_amount:3,payment_status}));
     const accounts:any[]=[];
     (globalThis as any).__uiOnboardingRequests=[];
@@ -29,12 +29,12 @@ try {
       if(url.startsWith('/api/accounts')){
         const paused=(globalThis as any).__uiOnboardingPaused===true;
         const respond=(body:unknown)=>new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
-        if(url==='/api/accounts/settings')return respond({enabled:true,canManageAccounts:!paused,staffInspectorAvailable:!paused,canDeactivate:true,municipalScopeId:'UI-SCOPE',municipalityName:'Synthetic UI municipality'});
+        if(url==='/api/accounts/settings')return respond({enabled:true,canManageAccounts:!paused,staffInspectorAvailable:!paused,canActivateAccounts:!paused,canDeactivate:true,municipalScopeId:'UI-SCOPE',municipalityName:'Synthetic UI municipality'});
         if(url==='/api/accounts/vendors')return respond({items:[{id:'UI-BUSINESS',name:'Synthetic UI business',marketName:'Test market',marketSection:'Test section',stallNumber:'TEST'}],nextCursor:null});
         if(init.method==='POST'){
           const body=JSON.parse(String(init.body||'{}'));
           (globalThis as any).__uiOnboardingRequests.push({url,body});
-          if(url==='/api/accounts')accounts.push({...body,uid:'UI-'+accounts.length,status:body.role==='vendor'?'active':'pending',invitationStatus:'sent'});
+          if(url==='/api/accounts')accounts.push({...body,uid:'UI-'+accounts.length,status:'pending',invitationStatus:'sent'});
           else {const account=accounts.find(a=>url.includes('/'+a.uid+'/'));if(account&&url.endsWith('/permissions'))account.staffPermissions=body.staffPermissions;if(account&&url.endsWith('/activate'))account.status='active';}
           return respond({message:'Synthetic UI account request completed.'});
         }
@@ -100,8 +100,8 @@ try {
         await accountForm.getByRole('button',{name:'Create account and send invitation',exact:true}).click();
         const card=page.locator('article').filter({has:page.getByText(persona+'@ui.example.test',{exact:true})});
         await card.waitFor();
-        assert.match(await card.innerText(),role==='vendor'?/vendor · active/:new RegExp(role+' · pending'));
-        if(role!=='vendor'){
+        assert.match(await card.innerText(),new RegExp(role+' · pending'));
+        {
           if(role==='staff'){
             await card.getByRole('button',{name:'Save staff functions',exact:true}).click();
             await card.getByRole('status').waitFor();

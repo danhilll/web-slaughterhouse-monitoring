@@ -26,7 +26,7 @@ async function fixture(t,enabled=true,now=()=>new Date().toISOString(),productio
   for(const value of ['A','B'])rows.set(`vendors/VEN-${value}`,{id:`VEN-${value}`,name:`Synthetic ${value}`,status:'Active',municipalScopeId:'SCOPE'});
   rows.set('operation_fee_schedules/SCOPE',structuredClone(fees));
   for(const value of ['A','B'])rows.set(`animal_records/ANM-${value}`,{id:`ANM-${value}`,vendorBusinessId:'VEN-A',municipalScopeId:'SCOPE',revision:1,inspection:{status:'approved',revision:1},species:'Pig',weightGrams:85001,identifier:`TEST-${value}`});
-  const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
+  const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,email_verified:true,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
   const animalStore={membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
   const store=createOperationsStore(()=>db),app=express();
   app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:req=>req.animalUser}));

@@ -5,9 +5,9 @@ import { createAccountsRouter, createAccountStore, createFirebaseInvitationSende
 import { createWebAdminMiddleware, createWriteGuard } from './access.js';
 
 async function fixture(t, options = {}) {
-  const state = { users: new Map(), accounts: new Map(), memberships: new Map(), profiles: new Map(), vendors: new Map(), events: [], mail: 0, time: Date.now(), ...options };
+  const state = { users: new Map(), accounts: new Map(), memberships: new Map(), profiles: new Map(), vendors: new Map([['VEN-A',{id:'VEN-A',status:'Active',municipalScopeId:'SCOPE-A'}]]), events: [], mail: 0, time: Date.now(), ...options };
   const auth = {
-    verifyIdToken: async token => { if (token === 'expired') throw { code: 'auth/id-token-expired' }; return { uid: token }; },
+    verifyIdToken: async token => { if (token === 'expired') throw { code: 'auth/id-token-expired' }; return { uid: token, email_verified: true }; },
     createUser: async u => { if ([...state.users.values()].some(x => x.email === u.email)) throw { code: 'auth/email-already-exists' }; state.users.set(u.uid, { ...u, customClaims: { preserved: true } }); },
     getUser: async uid => { if (state.identityFail) throw Error('private Auth failure'); return state.users.get(uid); },
     getUserByEmail: async email => { const u=[...state.users.values()].find(u=>u.email===email); if(!u)throw {code:'auth/user-not-found'};return u; },
@@ -23,7 +23,7 @@ async function fixture(t, options = {}) {
     vendors: async () => [{ id: 'VEN-A', name: 'Synthetic vendor' }],
     audit: async () => [],
     prepare: async a => { if([...state.accounts.values()].some(x=>x.email===a.email))throw Object.assign(Error('Already reserved'),{status:409});state.accounts.set(a.uid,{...a}); },
-    provision: async a => { state.accounts.set(a.uid, { ...a }); state.memberships.set(a.uid, { role:a.role, municipalScopeId:a.municipalScopeId, ...(a.staffPermissions ? {staffPermissions:a.staffPermissions} : {}), ...(a.vendorBusinessId ? {vendorBusinessId:a.vendorBusinessId} : {}), status: 'pending' }); state.profiles.set(a.uid,{email:a.email,role:a.role,municipalScopeId:a.municipalScopeId,status:'pending'}); },
+    provision: async a => { state.accounts.set(a.uid, { ...a }); state.memberships.set(a.uid, { role:a.role, municipalScopeId:a.municipalScopeId, ...(a.staffPermissions ? {staffPermissions:a.staffPermissions} : {}), ...(a.vendorBusinessId ? {vendorBusinessId:a.vendorBusinessId} : {}), status: 'pending' }); state.profiles.set(a.uid,{email:a.email,role:a.role,municipalScopeId:a.municipalScopeId,status:'pending',...(a.vendorBusinessId ? {vendorID:a.vendorBusinessId} : {})}); },
     recordFailure: async a => state.accounts.set(a.uid, { ...a, status: 'provisioning_failed' }),
     staffPermissions: async(uid, permissions) => { state.accounts.get(uid).staffPermissions=permissions;state.memberships.get(uid).staffPermissions=permissions; },
     reserveInvitation: async (uid, actor, at) => {
@@ -35,7 +35,7 @@ async function fixture(t, options = {}) {
     update: async (uid, patch, status, actor, action) => { Object.assign(state.accounts.get(uid), patch); if (status) { Object.assign(state.memberships.get(uid),{status}); Object.assign(state.profiles.get(uid),{status}); } state.events.push([action,uid]); }
   };
   // Exercise the real activation transaction, staging writes until commit.
-  const mapFor = path => ({managed_accounts:state.accounts,mobile_memberships:state.memberships,Users:state.profiles})[path.split('/')[0]];
+  const mapFor = path => ({managed_accounts:state.accounts,mobile_memberships:state.memberships,Users:state.profiles,vendors:state.vendors})[path.split('/')[0]];
   store.activate = createAccountStore(() => ({
     doc:path=>path, collection:()=>({doc:()=> 'account_audit/event'}),
     runTransaction:async fn=>{
@@ -76,17 +76,17 @@ test('administrator authentication and account gate prevent writes; billing rema
 test('vendor creation preserves claims and does not expose bootstrap password; duplicate is conflict',async t=>{
   const {call,state}=await fixture(t);
   const r=await call('','POST',form); assert.equal(r.status,201);
-  assert.equal(r.body.account.status,'active'); assert.equal(r.body.account.invitationStatus,'sent');
+  assert.equal(r.body.account.status,'pending'); assert.equal(r.body.account.invitationStatus,'sent');
   assert.equal(Object.hasOwn(r.body.account,'password'),false);
-  const u=state.users.get(r.body.account.uid); assert.equal(u.disabled,false); assert.equal(u.customClaims.preserved,true);
+  const u=state.users.get(r.body.account.uid); assert.equal(u.disabled,false); assert.equal(u.emailVerified,false); assert.equal(u.customClaims.preserved,true);
   assert.equal(JSON.stringify(r.body).includes(u.password),false);
   assert.equal(u.customClaims.municipalRole,'vendor'); assert.equal(u.customClaims.municipalScopeId,'SCOPE-A');
-  assert.equal(state.memberships.get(u.uid).status,'active');
+  assert.equal(state.memberships.get(u.uid).status,'pending');
   assert.equal((await call('','POST',form)).status,409); assert.equal(state.users.size,1);
 });
 test('unknown fields, admin roles and cross-scope business links are rejected before Auth creation',async t=>{
   const {call,state}=await fixture(t);
-  for(const bad of [{...form,municipalScopeId:'SCOPE-B'},{...form,role:'admin'},{...form,password:'secret'},{...form,vendorBusinessId:'OTHER'},{...form,role:'staff'},{...form,email:'invalid'}]) assert.ok([400,409].includes((await call('','POST',bad)).status));
+  for(const bad of [{...form,municipalScopeId:'SCOPE-B'},{...form,role:'admin'},{...form,password:'secret'},{...form,emailVerified:true},{...form,vendorBusinessId:'OTHER'},{...form,role:'staff'},{...form,email:'invalid'}]) assert.ok([400,409].includes((await call('','POST',bad)).status));
   assert.equal(state.users.size,0);
 });
 test('staff and inspector memberships stay pending',async t=>{
@@ -132,7 +132,7 @@ test('business registration derives identity and scope; invalid contact and inje
   const r=await call('/vendors','POST',b);assert.equal(r.status,201);assert.match(r.body.vendor.id,/^VEN-/);assert.equal(r.body.vendor.municipalScopeId,'SCOPE-A');assert.match(r.body.vendor.created_at,/^\d{4}-\d{2}-\d{2}$/);
   assert.equal((await call('/vendors','POST',b)).status,409);
   assert.equal((await call('/vendors','POST',{...b,municipalScopeId:'OTHER'})).status,400);
-  assert.equal((await call('/vendors','POST',{...b,contact_number:'bad'})).status,400);assert.equal(state.vendors.size,1);
+  assert.equal((await call('/vendors','POST',{...b,contact_number:'bad'})).status,400);assert.equal(state.vendors.size,2);
 });
 test('optional personal contact is stored as contact information and validated',async t=>{
   const {call}=await fixture(t);
@@ -268,18 +268,38 @@ test('all five onboarding personas retain least privilege, scope, business owner
     assert.equal(membership.municipalScopeId, 'SCOPE-A');
     assert.equal(membership.role, role);
     assert.deepEqual(membership.staffPermissions || [], permissions);
-    assert.equal(created.body.account.status, role === 'vendor' ? 'active' : 'pending');
-    assert.equal(membership.status, role === 'vendor' ? 'active' : 'pending');
+    assert.equal(created.body.account.status, 'pending');
+    assert.equal(membership.status, 'pending');
     assert.equal(created.body.account.vendorBusinessId, role === 'vendor' ? 'VEN-A' : undefined);
     assert.equal(membership.vendorBusinessId, role === 'vendor' ? 'VEN-A' : undefined);
     assert.ok(!JSON.stringify(created.body).includes(identity.password));
     for (const field of ['password', 'oobCode', 'oobLink', 'resetLink']) assert.equal(created.body.account[field], undefined);
     const before = structuredClone(identity);
-    if (role !== 'vendor') {
-      assert.equal((await call(`/${uid}/activate`, 'POST', {})).status, 200);
-      assert.equal(membership.status, 'active');
-      assert.deepEqual(state.users.get(uid), before);
-      assert.deepEqual(state.memberships.get(uid).staffPermissions || [], permissions);
+    assert.equal((await call(`/${uid}/activate`, 'POST', {})).status, 200);
+    assert.equal(membership.status, 'active');
+    assert.deepEqual(state.users.get(uid), before);
+    assert.deepEqual(state.memberships.get(uid).staffPermissions || [], permissions);
+  }
+});
+
+test('vendor activation requires separate administrator approval and matching approved business; it never verifies Auth', async t => {
+  for (const change of [null,
+    s => s.vendors.get('VEN-A').status = 'Inactive',
+    s => s.vendors.get('VEN-A').municipalScopeId = 'OTHER',
+    s => s.memberships.get(s.uid).vendorBusinessId = 'VEN-B',
+    s => s.profiles.get(s.uid).vendorID = 'VEN-B']) {
+    const { call, state } = await fixture(t);
+    state.uid = (await call('', 'POST', form)).body.account.uid;
+    assert.equal(state.memberships.get(state.uid).status, 'pending');
+    assert.equal(state.users.get(state.uid).emailVerified, false);
+    if (change) change(state);
+    const before = structuredClone([state.users, state.accounts, state.memberships, state.profiles, state.events]);
+    const result = await call(`/${state.uid}/activate`, 'POST', {});
+    assert.equal(result.status, change ? 409 : 200);
+    if (change) assert.deepEqual([state.users, state.accounts, state.memberships, state.profiles, state.events], before);
+    else {
+      assert.equal(state.memberships.get(state.uid).status, 'active');
+      assert.deepEqual(state.users, before[0]); // Approval does not mark the mailbox verified or assign a password.
     }
   }
 });

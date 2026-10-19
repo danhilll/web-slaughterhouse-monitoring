@@ -39,7 +39,7 @@ function deferred() {
 }
 
 const session = uid => ({ uid, email: null, role: 'admin', writesEnabled: false });
-const account = uid => ({ uid, getIdToken: async () => 'synthetic-token' });
+const account = uid => ({ uid, email: uid+'@example.test', emailVerified: true, getIdToken: async () => 'synthetic-token' });
 
 function authGateFixture() {
   // Execute the actual TSX and apiFetch with deterministic hooks and fake Firebase.
@@ -118,7 +118,7 @@ function authGateFixture() {
   const notify = async user => { await begin(user); render(); };
   render();
   return {
-    auth, firebaseAuth, replies, render, begin, notify, text: () => text(tree),
+    auth, firebaseAuth, replies, render, begin, notify, apiFetch: modules['./api'].apiFetch, text: () => text(tree),
     app: () => nodes(tree).find(node => node.type === App),
     async establish(user = account('ADMIN-A')) {
       replies.push(Response.json(session(user.uid)));
@@ -132,6 +132,12 @@ function authGateFixture() {
       button.props.onClick(); render();
       await notify(auth.currentUser);
     },
+    async click(label) {
+      const node = nodes(tree).find(node => node.type === 'button' && text(node) === label);
+      assert.ok(node, `Missing button: ${label}`);
+      await node.props.onClick(); await new Promise(resolve => setImmediate(resolve)); render();
+    },
+    input(id, value) { const node = nodes(tree).find(node => node.type === 'input' && node.props.id === id); assert.ok(node); node.props.onChange({ target: { value } }); render(); },
     accessLost(status) { window.dispatchEvent(new CustomEvent(modules['./api'].WEB_ACCESS_LOST_EVENT, { detail: status })); render(); }
   };
 }
@@ -256,4 +262,67 @@ test('AuthGate ignores a superseded refresh success after a newer temporary fail
   await old; f.render();
   assert.equal(f.app().props.session, original);
   assert.match(f.text(), /has not been reverified/);
+});
+
+
+test('web verification blocks application/API access and sends only the signed-in user to Firebase verification', async () => {
+  const f = authGateFixture(), user = { ...account('UNVERIFIED'), emailVerified: false };
+  await f.notify(user);
+  assert.equal(f.app(), undefined); assert.match(f.text(), /Email verification is required/);
+  let mailed;
+  f.firebaseAuth.sendEmailVerification = async target => { mailed = target; };
+  await f.click('Send verification email');
+  assert.equal(mailed, user); assert.equal(f.app(), undefined);
+  assert.match(f.text(), /delivery is not guaranteed/);
+  f.firebaseAuth.sendEmailVerification = async () => { throw { code: 'auth/too-many-requests' }; };
+  await f.click('Send verification email');
+  assert.match(f.text(), /Too many verification requests/); assert.equal(f.app(), undefined);
+});
+
+test('verification refresh reloads profile then forces a new token and still requires backend authorization', async () => {
+  const f = authGateFixture(), user = { ...account('UNVERIFIED'), emailVerified: false }, calls = [];
+  await f.notify(user);
+  f.firebaseAuth.reload = async target => { assert.equal(target, user); calls.push('reload'); };
+  user.getIdToken = async force => { assert.equal(force, true); calls.push('token'); return 'synthetic'; };
+  await f.click('I verified my email — check again');
+  assert.deepEqual(calls, ['reload','token']); assert.equal(f.app(), undefined); assert.match(f.text(), /still unverified/);
+  f.firebaseAuth.reload = async () => { user.emailVerified = true; };
+  await f.click('I verified my email — check again');
+  // A verified profile is insufficient: even a 503/403 must not grant workspace access.
+  assert.equal(f.app(), undefined);
+  user.getIdToken = async () => 'synthetic';
+  f.replies.push(Response.json({}, { status: 403 })); await f.notify(user);
+  assert.equal(f.app(), undefined);
+});
+
+test('verification denial clears established access with a recovery-specific message and preserves the response body', async () => {
+  const f = authGateFixture(), user = await f.establish();
+  f.replies.push(Response.json({ code: 'EMAIL_VERIFICATION_REQUIRED', message: 'Verify your email address before accessing this service.' }, { status: 403 }));
+  const response = await f.apiFetch('/api/session'); f.render();
+  assert.equal((await response.json()).code, 'EMAIL_VERIFICATION_REQUIRED');
+  assert.equal(f.app(), undefined); assert.match(f.text(), /Verify your email address/);
+  assert.match(f.text(), /Send verification email/);
+});
+
+test('reset recovery uses official Firebase emails, hides unknown-account status, and never grants access', async () => {
+  const f = authGateFixture(); await f.notify(null);
+  f.input('admin-email', 'recover@example.test');
+  let addressed;
+  f.firebaseAuth.sendPasswordResetEmail = async (_auth, email) => { addressed = email; };
+  await f.click('Reset Firebase password');
+  assert.equal(addressed, 'recover@example.test'); assert.match(f.text(), /If this email belongs/); assert.equal(f.app(), undefined);
+  f.firebaseAuth.sendPasswordResetEmail = async () => { throw { code: 'auth/user-not-found' }; };
+  await f.click('Reset Firebase password'); assert.match(f.text(), /If this email belongs/);
+  f.firebaseAuth.sendPasswordResetEmail = async () => { throw { code: 'auth/too-many-requests' }; };
+  await f.click('Reset Firebase password'); assert.match(f.text(), /Too many reset requests/); assert.equal(f.app(), undefined);
+});
+
+test('unverified notification immediately removes an established workspace, including pending responses', async () => {
+  const f = authGateFixture(), user = await f.establish(), pending = deferred();
+  f.replies.push(() => pending.promise);
+  const refresh = f.begin(user);
+  user.emailVerified = false; await f.notify(user);
+  assert.equal(f.app(), undefined);
+  pending.resolve(Response.json(session(user.uid))); await refresh; f.render();
+  assert.equal(f.app(), undefined);
 });

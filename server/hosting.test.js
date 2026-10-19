@@ -16,7 +16,7 @@ async function fixture(t, enabled = true) {
   await writeFile(join(directory, '.env'), 'private test value');
   const app = express(); let ready = false;
   registerReadiness(app, () => ready);
-  app.use('/api', createWebAdminMiddleware(() => ({ verifyIdToken: async token => ({ uid: token }) }), new Set(['admin'])));
+  app.use('/api', createWebAdminMiddleware(() => ({ verifyIdToken: async token => ({ uid: token, email_verified: true }) }), new Set(['admin'])));
   app.use('/api', (req, res) => res.status(404).json({ message: 'API route not found.' }));
   registerWebAssets(app, { enabled, directory });
   const server = app.listen(0, '127.0.0.1');

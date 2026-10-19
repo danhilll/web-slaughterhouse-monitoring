@@ -29,7 +29,7 @@ async function fixture(t,{gate=true,enabled=true}={}) {
   rows.set('vendors/VEN-A',{id:'VEN-A',name:'Synthetic business',municipalScopeId:'SCOPE',status:'Active'});
   rows.set('animal_records/ANM-A',{id:'ANM-A',municipalScopeId:'SCOPE',vendorBusinessId:'VEN-A',identifier:'TEST-A',identifierType:'manual',species:'Pig',weightGrams:85001,weighedAt:'2026-10-15T05:00:00.000Z',revision:1,inspection:{status:'approved',revision:1,inspectorUid:'inspector',decidedAt:'2026-10-15T05:30:00.000Z',notes:'Verified'},createdAt:at,createdBy:'inventory',updatedAt:at,updatedBy:'inspector'});
   rows.set('operation_fee_schedules/SCOPE',{status:'approved',version:1,basis:'perAnimal',currency:'PHP',corralCents:1500,deliveryCents:2500,inspectionCents:1000,facilityCents:4500,syntheticOnly:true});
-  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(token==='expired')throw {code:'auth/id-token-expired'};const m=rows.get(`mobile_memberships/${token}`);return {uid:token,municipalRole:m?.role,municipalScopeId:m?.municipalScopeId};}};
+  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(token==='expired')throw {code:'auth/id-token-expired'};const m=rows.get(`mobile_memberships/${token}`);return {uid:token,email_verified:true,municipalRole:m?.role,municipalScopeId:m?.municipalScopeId};}};
   const store=createAnimalStore(()=>db),app=express();app.use(express.json());
   const options={store,enabled,now:()=>at,...(gate===undefined?{}:{carcassWeightEnabled:gate})};
   app.use('/api/mobile/animals',createAnimalMobileAuth(()=>auth,store),createAnimalRouter({...options,getPrincipal:req=>req.animalUser}));

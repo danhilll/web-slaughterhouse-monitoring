@@ -6,6 +6,7 @@ function response() {
   return {
     statusCode: 200,
     body: null,
+    set() { return this; },
     status(code) { this.statusCode = code; return this; },
     json(body) { this.body = body; return this; }
   };
@@ -26,7 +27,7 @@ test('anonymous API request is rejected before token verification', async () => 
 
 test('valid vendor token cannot access the web administrator API', async () => {
   const res = response();
-  const middleware = createWebAdminMiddleware(() => ({ verifyIdToken: async () => ({ uid: 'vendor' }) }), new Set(['admin']));
+  const middleware = createWebAdminMiddleware(() => ({ verifyIdToken: async () => ({ uid: 'vendor', email_verified: true }) }), new Set(['admin']));
   await middleware({ headers: { authorization: 'Bearer token' } }, res, () => assert.fail('must not continue'));
   assert.equal(res.statusCode, 403);
 });
@@ -73,7 +74,7 @@ test('allowlisted admin reaches API with a verified identity', async () => {
     verifyIdToken: async (token, checkRevoked) => {
       assert.equal(token, 'token');
       assert.equal(checkRevoked, true);
-      return { uid: 'second', email: 'admin@example.test' };
+      return { uid: 'second', email_verified: true, email: 'admin@example.test' };
     }
   }), new Set(['first', 'second']));
   await middleware(req, res, () => { nextCalled = true; });

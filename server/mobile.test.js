@@ -33,6 +33,7 @@ async function fixture(t, change = () => {}, production = null) {
       invoice('INV-7', 'VEN-A', undefined)],
     reads: [], now: 1000, writes: 0
   };
+  for (const token of Object.values(state.tokens)) token.email_verified = true;
   // Unscoped fixture must remain invisible even when its vendor reference matches.
   delete state.invoices.at(-1).municipalScopeId;
   change(state);
@@ -232,4 +233,19 @@ test('production mobile reads reject otherwise valid membership in a different m
   const {request}=await fixture(t,()=>{},{municipalScopeId:'SCOPE-A'});
   assert.equal((await request('/api/mobile/me','alice')).status,200);
   assert.equal((await request('/api/mobile/me','carol')).status,403);
+});
+
+
+test('verified email never substitutes for active approved membership or matching role/scope', async t => {
+  for (const change of [
+    s => s.memberships['UID-A'].status = 'pending',
+    s => s.memberships['UID-A'].status = 'inactive',
+    s => delete s.memberships['UID-A'],
+    s => s.tokens.alice.municipalRole = 'staff',
+    s => s.tokens.alice.municipalScopeId = 'OTHER',
+    s => s.vendors['VEN-A'].status = 'Inactive'
+  ]) {
+    const { request } = await fixture(t, change);
+    assert.equal((await request('/api/mobile/me')).status, 403);
+  }
 });

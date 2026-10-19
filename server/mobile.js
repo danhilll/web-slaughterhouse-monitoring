@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
-import { verifyFirebaseIdToken } from './access.js';
+import { EMAIL_VERIFICATION_REQUIRED, verifyFirebaseIdToken } from './access.js';
 import { isValidHeadcount } from './headcounts.js';
 
 const ROLES = new Set(['vendor', 'staff', 'inspector']);
@@ -139,6 +139,7 @@ export function createMobileRouter({ getAuth, store, production = null, cursorSe
       req.mobileUser = principal;
       next();
     } catch (failure) {
+      if (failure?.code === EMAIL_VERIFICATION_REQUIRED) return error(res, 403, failure.code, failure.message);
       if (failure?.status === 401) return error(res, 401, 'invalid_session', 'Your session is invalid or expired.');
       return error(res, 503, 'unavailable', 'Mobile access is unavailable.');
     }

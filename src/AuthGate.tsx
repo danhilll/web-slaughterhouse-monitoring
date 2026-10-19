@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { onIdTokenChanged, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth';
+import { onIdTokenChanged, reload, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth';
 import App from './App';
-import { apiFetch, WEB_ACCESS_LOST_EVENT } from './api';
+import { apiFetch, EMAIL_VERIFICATION_REQUIRED, WEB_ACCESS_LOST_EVENT } from './api';
 import { auth, isFirebaseConfigured } from './firebase';
 import { ArrowUpRight, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { AmbientBackdrop, LedgerArtwork, WorkspaceBrand } from './WorkspaceIdentity';
@@ -45,6 +45,8 @@ export default function AuthGate() {
   const [loading, setLoading] = useState(Boolean(auth));
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [verificationRequired, setVerificationRequired] = useState(false);
+  const [verificationBusy, setVerificationBusy] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -60,7 +62,10 @@ export default function AuthGate() {
       requestId.current += 1;
       setSession(null);
       setLoading(false);
-      setError((event as CustomEvent<number>).detail === 401
+      const detail = (event as CustomEvent<number | { status: number; code: string }>).detail;
+      const needsVerification = typeof detail === 'object' && detail?.code === EMAIL_VERIFICATION_REQUIRED;
+      setVerificationRequired(needsVerification);
+      setError(needsVerification ? 'Verify your email address before accessing this service.' : detail === 401
         ? 'Your web session expired or was revoked. Please sign in again.'
         : 'This account no longer has web administrator access.');
     };
@@ -70,10 +75,11 @@ export default function AuthGate() {
       const currentRequest = ++requestId.current;
       setAuthUser(user);
       // A refresh may keep only this user's already established session.
-      setSession(current => user && current?.uid === user.uid ? current : null);
+      setSession(current => user?.emailVerified === true && current?.uid === user.uid ? current : null);
+      setVerificationRequired(Boolean(user && user.emailVerified !== true));
       setLoading(true);
       setError('');
-      if (!user) {
+      if (!user || user.emailVerified !== true) {
         setLoading(false);
         return;
       }
@@ -122,12 +128,13 @@ export default function AuthGate() {
   };
 
   const handlePasswordReset = async () => {
-    if (!auth || !email.trim() || resetting) return;
+    const recoveryEmail = email.trim() || authUser?.email || '';
+    if (!auth || !recoveryEmail || resetting) return;
     setResetting(true);
     setError('');
     setNotice('');
     try {
-      await sendPasswordResetEmail(auth, email.trim());
+      await sendPasswordResetEmail(auth, recoveryEmail);
       setPassword('');
       setNotice('If this email belongs to a Firebase account, a reset link has been sent. Check your inbox and spam folder.');
     } catch (reason) {
@@ -146,10 +153,40 @@ export default function AuthGate() {
     }
   };
 
+  const handleVerification = async (refresh: boolean) => {
+    const user = auth?.currentUser;
+    if (!user || verificationBusy) return;
+    setVerificationBusy(true); setError(''); setNotice('');
+    try {
+      if (refresh) {
+        await reload(user);
+        if (auth?.currentUser !== user) return;
+        // A reloaded profile alone cannot authorize the API: replace the stale signed claim.
+        await user.getIdToken(true);
+        if (auth?.currentUser !== user) return;
+        setVerificationRequired(user.emailVerified !== true);
+        if (!user.emailVerified) setNotice('Email is still unverified. Open the Firebase verification email, then check again.');
+        setRetryCount(count => count + 1);
+      } else {
+        await sendEmailVerification(user);
+        if (auth?.currentUser === user) setNotice('Firebase accepted the verification email request. Check your inbox and spam folder; delivery is not guaranteed.');
+      }
+    } catch (reason) {
+      if (auth?.currentUser !== user) return;
+      const code = typeof reason === 'object' && reason !== null && 'code' in reason ? String(reason.code) : '';
+      setError(code === 'auth/too-many-requests' ? 'Too many verification requests. Please wait before trying again.'
+        : 'Could not complete email verification. Check your connection and retry, or sign out and sign in again.');
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     requestId.current += 1;
     setSession(null);
     setAuthUser(null);
+    setVerificationRequired(false);
+    setNotice('');
     setLoading(false);
     setError('');
     if (auth) await signOut(auth);
@@ -199,10 +236,15 @@ export default function AuthGate() {
             {notice && <p role="status" className="mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
             {authUser && (
               <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
-                Signed in as {authUser.email || authUser.uid}. Web access could not be verified.
+                Signed in as {authUser.email || authUser.uid}. {verificationRequired ? 'Email verification is required.' : 'Web access could not be verified.'}
               </p>
             )}
-            {authUser && error && (
+            {authUser && verificationRequired && <section aria-label="Email verification" className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-950">
+              <p>Verify your mailbox through Firebase. You can verify or recover your account here even if you use the mobile app. Verification does not approve membership or grant administrator access.</p>
+              <button type="button" disabled={verificationBusy} onClick={() => void handleVerification(false)} className="btn-secondary mt-3 w-full">Send verification email</button>
+              <button type="button" disabled={verificationBusy} onClick={() => void handleVerification(true)} className="btn-secondary mt-2 w-full">I verified my email — check again</button>
+            </section>}
+            {authUser && error && !verificationRequired && (
               <button type="button" onClick={() => setRetryCount((count) => count + 1)} className="btn-ghost mb-4 w-full">
                 Retry access check
               </button>
@@ -223,10 +265,10 @@ export default function AuthGate() {
               </div>
               <button type="submit" disabled={submitting} className="btn-primary w-full">{submitting ? 'Signing in…' : 'Sign in to workspace'}<ArrowUpRight size={16} /></button>
             </form>
-            <button type="button" disabled={!email.trim() || resetting} onClick={() => void handlePasswordReset()} className="btn-ghost mt-3 w-full">
+            <button type="button" disabled={(!email.trim() && !authUser?.email) || resetting} onClick={() => void handlePasswordReset()} className="btn-ghost mt-3 w-full">
               {resetting ? 'Sending reset email…' : 'Reset Firebase password'}
             </button>
-            <p className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">This does not change your Google account password.</p>
+            <p className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">Use your own mailbox to recover your Firebase password. Administrators cannot view or assign your password. Recovery does not activate membership.</p>
             {authUser && <button type="button" onClick={() => void handleSignOut()} className="btn-ghost mt-4 w-full">Sign out</button>}
           </>
         )}

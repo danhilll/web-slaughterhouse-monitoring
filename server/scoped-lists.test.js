@@ -17,7 +17,7 @@ async function fixture(t,{size=101,scope='SCOPE',key=Buffer.alloc(32,1),now=()=>
     });return query();
   }};
   const store=createScopedReads(()=>db,scope),app=express();
-  app.use('/api',createWebAdminMiddleware(()=>({verifyIdToken:async uid=>({uid})}),new Set(['ADMIN','ADMIN-2'])));
+  app.use('/api',createWebAdminMiddleware(()=>({verifyIdToken:async uid=>({uid,email_verified:true})}),new Set(['ADMIN','ADMIN-2'])));
   app.use('/api',createScopedListRouter({store,scope,cursorSecret:key,now}));
   app.use((error,req,res,next)=>res.status(503).json({message:'Read unavailable.'}));
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));

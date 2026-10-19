@@ -1,12 +1,14 @@
 # First usable production workflow — proposed, not enabled
 
-Candidate base: web `3539ad169999125c0452b5c61facccddc8e1cad0`, with the already-tested
-DOM/router 7.18.4 migration copied into this separate checkout. The original web worktree,
+Committed parent checkpoint: web `7d118982ab5594111aef29af6460815d103ee5d4`, which already contains
+the reviewed DOM/router 7.18.4 migration and animal-response hardening. This pending follow-up
+adds verified-email/approval enforcement and compatible account-recovery flows. See
+`FIRST_PRODUCTION_ANDROID_CHECKPOINT.md` for its exact 23-file scope and Android contract. The original web worktree,
 pending documentation/index work and original isolated router candidate are preserved.
 UAT is stopped; no further rehearsal feature, fixture, device or workflow action is part of this work. This document's table is the current blocker list for this candidate; historical checklist entries and audit counts are retained, not promoted as current defects. jsPDF 4.2.1 and the earlier compatible security fixes are already in the base.
 
-Scope: allowlisted web administrator registers a business and creates accounts; reviewed activation
-of inventory staff and inspectors; normal mobile login; inventory registration; inspector ownership/
+Scope: verified, allowlisted web administrator registers a business and creates accounts; reviewed activation
+of all mobile accounts including vendors, inventory staff and inspectors; normal mobile login; inventory registration; inspector ownership/
 current-revision review and approval. The web entry for onboarding is `/users`, not the legacy
 Vendors mutation form. Inventory correction remains reasoned/revisioned and clears prior approval.
 Inspectors remain the only decision writers; administrator activation is not inspection approval.
@@ -16,8 +18,8 @@ Inspectors remain the only decision writers; administrator activation is not ins
 | Category | Concrete blocker / current disposition |
 | --- | --- |
 | Confirmed code defects | **Fixed in this web candidate:** animal API validation accepted stored records without audit fields required by the mobile parser, permitting malformed HTTP 200 responses. A regression first failed (`createdAt` absent → 200), then passed after validating created/updated timestamps/actors and completed inspection evidence. Invalid records now return existing review-required 503s; no missing evidence is fabricated and no stored data is rewritten. **Android-owned candidate:** optional operations/settings 503 blocked otherwise authorized inventory login; Android's final candidate includes the reproduced optional-service fix, preserves 401/primary authorization and passes the added regressions, including inspector independence. Source/artifact provenance is recorded below; neither fix establishes the cause of the unexplained inspector incident. |
-| Missing configuration/permissions and acceptance | Existing read/deactivate role proposal lacks `firebaseauth.users.create`; proposed first-workflow role adds only that permission. Effective runtime IAM is still unverified. Verify existing Firebase/Render identity, administrator allowlist, stable cursor secret, web app build variables, same-origin HTTPS, denied client rules, required READY indexes, Auth password provider/API-key restrictions and actual approved-mailbox setup-email delivery. Do not substitute emulator invitations. No approved release signing key was found by Android; debug/rehearsal APKs are not the production distribution artifact. A reviewed signed APK and narrow authenticated first-workflow/physical HTTPS acceptance remain required. The active-inspector UAT error has no captured stage/exception or established cause and remains an acceptance gap, not a diagnosed production defect. |
-| Owner decisions | Name who may validate business/stall ownership and approve inventory/inspector activation/recovery; decide whether verified email is mandatory. Current code permits password setup without enforcing email verification. Identify an approved signing identity/distribution channel. Decide whether the four residual advisories below require pre-release remediation or an explicit temporary risk acceptance with mitigations. Financial/body-part/delivery policy decisions do **not** block this limited lane: those capabilities stay unavailable. |
+| Missing configuration/permissions and acceptance | Existing read/deactivate role proposal lacks `firebaseauth.users.create`; proposed first-workflow role adds only that permission. Effective runtime IAM is still unverified. Verify existing Firebase/Render identity, administrator allowlist, stable cursor secret, web app build variables, same-origin HTTPS, denied client rules, required READY indexes, Auth password provider/API-key restrictions and actual approved-mailbox setup-email delivery. Do not substitute emulator invitations. The owner now reports the signed production APK verified against the reviewed 19 October source. Attach its exact signed artifact/certificate attestation to the deployment record; older unsigned/debug/rehearsal hashes are not its identity. Narrow authenticated first-workflow/physical HTTPS acceptance remains required. The active-inspector UAT error has no captured stage/exception or established cause and remains an acceptance gap, not a diagnosed production defect. |
+| Owner decisions | The owner has decided that web administrators approve business ownership and all mobile activation, and Firebase email verification plus approved active membership are required. The local follow-up implements server/web enforcement; see AUTHENTICATION_POLICY.md for the exact contract and remaining authenticated integration gaps. Approval never sets emailVerified=true; users recover through official Firebase reset emails. Preserve the owner-verified signing identity and confirm the distribution/update acceptance record. Decide whether the four residual advisories below require pre-release remediation or an explicit temporary risk acceptance with mitigations. Financial/body-part/delivery policy decisions do **not** block this limited lane: those capabilities stay unavailable. |
 | Unresolved advisories | Four unique web IDs remain (12 affected package entries, not 12 vulnerabilities): two gRPC findings in the production dependency tree; braces and selector parsing in build/development tooling. Installed exposure, constraints and mitigation are listed below. Test success and absent observed triggers are not safety decisions. Android's separately prepared dependency fixes also need exact candidate/artifact provenance; no security acceptance transfers automatically between APKs. |
 
 ## Local changes and reused evidence
@@ -41,7 +43,7 @@ Inspectors remain the only decision writers; administrator activation is not ins
 Reused router evidence: v6/v7 direct URLs/refresh, history, nested navigation, dialogs,
 login/logout/access loss, existing workspace/PDF browser checks and lock consistency. Current
 candidate's frontend/router bytes match that evidence. No full onboarding/tracking/device suite is
-repeated. **Passed:** 110 focused tests, six proposed-configuration checks, typecheck, build, dependency consistency and source/diff checks. The existing large-bundle warning remains. **Runtime mitigation verified after recovery:** clean runtime-only install, imports and consistency passed; braces/parser/Tailwind/nodemon are absent from that isolated tree. The initial ENOSPC failure is retained; only this task's regenerable dependency installs were removed to make room. Original/candidate source, dist, logs and existing checkouts were retained. Build-space headroom must be monitored, but the probe is no longer blocked. New changed-path checks cover accounts, production configuration, access, mobile,
+repeated. **Prior parent evidence passed:** 110 focused tests, six proposed-configuration checks, typecheck, build, dependency consistency and source/diff checks. **Policy follow-up evidence passed:** 143 affected-path tests, a 35-test follow-up after final assertion edits, typecheck/build and focused mock-browser checks. These completed checks are reused, not rerun by this review. The existing large-bundle warning remains. **Runtime mitigation verified after recovery:** clean runtime-only install, imports and consistency passed; braces/parser/Tailwind/nodemon are absent from that isolated tree. The initial ENOSPC failure is retained; only this task's regenerable dependency installs were removed to make room. Original/candidate source, dist, logs and existing checkouts were retained. Build-space headroom must be monitored, but the probe is no longer blocked. New changed-path checks cover accounts, production configuration, access, mobile,
 animals, shared carcass validation and operations, plus typecheck/build/dependency consistency.
 Initial failing regression and fixture-compatibility failure logs are retained with the final passes.
 
@@ -82,7 +84,7 @@ Initial failing regression and fixture-compatibility failure logs are retained w
 5. **Exclude development tools from the running artifact.** Proposed build command:
    `npm ci --include=dev --no-audit && npm run typecheck && npm run build && npm ci --omit=dev --ignore-scripts --no-audit`;
    start remains `npm start`. The second install retains dist and installs the same locked runtime
-   tree without dev tools. A separate runtime-only install/import/consistency probe passed after recovery from an initial ENOSPC failure. The resulting tree excludes braces, selector-parser, Tailwind and nodemon; gRPC 1.9.16 remains alongside patched 1.14.5. Runtime module imports performed no app initialization or credential/network access. Only this task's regenerable dependency installations were removed for space; logs/source/evidence remain. The source candidate needs npm ci again for any future dev checks.
+   tree without dev tools. A separate runtime-only install/import/consistency probe passed after recovery from an initial ENOSPC failure. The resulting tree excludes braces, selector-parser, Tailwind and nodemon; gRPC 1.9.16 remains alongside patched 1.14.5. Runtime module imports performed no app initialization or credential/network access. Only this task's regenerable dependency installations were removed for space; logs/source/evidence remain. The original dependency-probe checkpoint needed npm ci again; dependencies were restored later for the policy checks. Reproduce checks in an isolated checkout without modifying shared runtime installs.
    Build workers still process vulnerable tooling: use reviewed inputs, disposable credential-free
    workers and external resource/time limits. No audit suppression or vulnerability resolution is
    implied by `--no-audit`; advisory review is the separate saved evidence.
@@ -96,7 +98,7 @@ Initial failing regression and fixture-compatibility failure logs are retained w
    Loader refusal of reserved enablement remains. Render secret-file saving can trigger deployment;
    do not treat it as a harmless staging operation. This step needs explicit future authorization.
 8. **Accept only this lane on the exact release.** Web `/users`: legitimate approved business/account,
-   real participant mailbox password setup, pending denial, explicit inventory function/activation;
+   real participant mailbox password setup and Firebase verification, pending denial, explicit administrator approval for every mobile membership and saved inventory functions;
    mobile normal package on approved HTTPS origin: authorized inventory registration and inspector
    business/stall/current-revision review/approval, wrong-role/scope denial and logout/account switch.
    Record only new scoped outcomes. Historical successful workflows and the unresolved later
@@ -105,11 +107,12 @@ Initial failing regression and fixture-compatibility failure logs are retained w
 
 ## Rollback
 
-First restore the **same-project/scope/origin all-off manifest** from
+Rollback must retain verified-email enforcement and active-membership checks on protected reads; an older artifact without these guards is not an acceptable automatic fallback. First restore the **same-project/scope/origin all-off manifest** from
 `deployment/production-release.json`; preserve the same stable cursor secret. All nine mutations
 close; authorized history and existing allowlisted emergency deactivation remain available.
-Then, if needed, restore the previously recorded known-good server/web artifact and its matching
-reviewed configuration, not an arbitrary historical commit. No exact deployed rollback SHA is
+Then, if needed, restore a previously recorded policy-compatible server/web artifact and its matching
+reviewed configuration. If none exists, fail closed with an operator-controlled maintenance stop;
+do not serve the older unverified-access implementation. No exact deployed rollback SHA is
 invented here: it must be captured before deployment. Retain the newly created business/account/
 animal/audit records; no database rollback, deletion, reset or credential rotation is automatic.
 If a particular new account must be contained, separately authorize the supported deactivation
@@ -130,11 +133,11 @@ six→four unique IDs; no router finding/new ID. No new broad audit was run for 
 | GHSA-rj75-hqrm-r3gf (moderate), parser 6.1.4 via Tailwind/postcss-nested | Hostile CSS selectors consume CPU during builds; verified absent from the isolated runtime-only tree, but still used during build. No deployed mitigation is claimed. | Fixed 7.1.6 outside both parents' ^6 constraints. Reviewed build migration required; restrict untrusted CSS and isolate builds. |
 
 IDs link to their upstream records in DEPENDENCY_SECURITY_REVIEW.md. Risk acceptance, if granted,
-must name these conditions, mitigation owner and review/expiry; it is not remediation. Release/signing,
+must name these conditions, mitigation owner and review/expiry; it is not remediation. Signed-artifact record/update acceptance,
 effective IAM, mailbox delivery and the narrow mobile acceptance gap remain blockers independently.
 
 
-## Android candidate — separately owned and verified
+## Historical Android candidate — separately owned, 18 October 2026
 
 See `/Users/johnvianneynoscal/Documents/NewFile/Capsto-Project/ANDROID_PRODUCTION_RELEASE.md`.
 Android owns the confirmed optional-operations fix and opt-in fail-closed signing configuration.
@@ -164,3 +167,35 @@ Once an existing release key is approved, Android expects secure local environme
 ANDROID_RELEASE_STORE_FILE, ANDROID_RELEASE_KEY_ALIAS, ANDROID_RELEASE_STORE_PASSWORD and
 ANDROID_RELEASE_KEY_PASSWORD. No secret value belongs in chat/arguments/committed files.
 No key was found/created, no debug signing fallback applied, and no APK was installed.
+
+
+## Focused first-Android policy follow-up — 19 October 2026
+
+The current source review is `FIRST_PRODUCTION_ANDROID_CHECKPOINT.md`. Android email/recovery
+implementation is now locally complete at 387fbaa plus 16 tested overlays; the earlier read-only
+compatibility assessment is historical. Its production runtime origin is the single approved HTTPS
+origin, not the rehearsal 5002/5003 split. No new rehearsal acceptance or adapter work is required by
+this production checkpoint. Real invitation/verification/recovery delivery and authenticated
+first-lane acceptance, effective runtime permissions, signed artifact attestation/distribution acceptance and the four
+retained advisories remain unresolved. No live configuration or gate changed.
+
+
+The 19 October Android source manifest is `source-manifest-bcc1753c4194.json` (SHA256
+bcc1753c4194dda3868b12f0bfa8708fee6bf0c54f716f5adfcf764babb045bf). It includes the same 16-file
+email/recovery scope plus the confirmed pre-access cancellation fix. Final validation: 114 debug
+and six focused release email-access tests, release assembly, lint zero errors/27 warnings; prior 113
+full-release tests retained. At the earlier unsigned checkpoint, APK SHA256 was
+b8edb690e475bbf1613501e1a002c3bc7202994aa728b981ea00fd07147a676b. That identity is historical
+and must not be used for the subsequently owner-verified signed APK. Update continuity and
+authenticated production acceptance remain unresolved; attach the signed artifact attestation below.
+
+
+### Final-review update — signed Android APK
+
+The owner confirms a signed production APK verified against the reviewed 19 October source. This
+supersedes the earlier missing-signing-input blocker; older unsigned/debug artifact sections remain
+historical evidence. The backend packet has no independently supplied signed APK hash/certificate
+reference: attach the existing verified Android attestation before deployment, without repeating the
+signing flow or reusing an unsigned hash. Authenticated first-lane acceptance, effective runtime IAM
+and official mail delivery remain outstanding. Code deployment, IAM approval and feature enablement
+are separate operations in FIRST_PRODUCTION_ANDROID_CHECKPOINT.md; nothing is applied here.

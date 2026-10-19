@@ -25,7 +25,7 @@ async function fixture(t,enabled=true,production=null){
     history:async()=>state.events
   };
   state.claimOverrides={};
-  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(state.verificationFailure)throw state.verificationFailure;if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,municipalRole:state.memberships[token]?.role,municipalScopeId:state.memberships[token]?.municipalScopeId,...state.claimOverrides[token]};}};
+  const auth={verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);if(state.verificationFailure)throw state.verificationFailure;if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,email_verified:true,municipalRole:state.memberships[token]?.role,municipalScopeId:state.memberships[token]?.municipalScopeId,...state.claimOverrides[token]};}};
   const app=express();
   app.use('/api/mobile/animals',express.json(),createAnimalMobileAuth(()=>auth,store),createAnimalRouter({store,enabled,production,getPrincipal:req=>req.animalUser,cursorSecret:Buffer.alloc(32,1)}));
   app.use('/api',createWebAdminMiddleware(()=>auth,new Set(['ADMIN'])));

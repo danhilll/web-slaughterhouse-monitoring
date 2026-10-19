@@ -108,9 +108,18 @@ export function createAccountStore(getDb) {
         const a = (await tx.get(managed(uid))).data();
         const membership = db().doc(`mobile_memberships/${uid}`), user = db().doc(`Users/${uid}`);
         const m = (await tx.get(membership)).data(), u = (await tx.get(user)).data();
-        if (!a || a.uid !== uid || !['staff', 'inspector'].includes(a.role) ||
-            [a, m, u].some(row => !row || row.role !== a.role || row.status !== 'pending' || row.municipalScopeId !== scope || row.vendorBusinessId !== undefined || row.vendorID !== undefined) ||
-            !text(a.email, 254) || u.email !== a.email) throw fail(409, 'Only matching pending staff or inspector accounts can be activated.');
+        if (!a || a.uid !== uid || !roles.has(a.role) ||
+            [a, m, u].some(row => !row || row.role !== a.role || row.status !== 'pending' || row.municipalScopeId !== scope) ||
+            !text(a.email, 254) || u.email !== a.email) throw fail(409, 'Only matching pending mobile accounts can be activated.');
+        if (a.role === 'vendor') {
+          if (!id(a.vendorBusinessId) || m.vendorBusinessId !== a.vendorBusinessId || u.vendorID !== a.vendorBusinessId ||
+              a.vendorID !== undefined || m.vendorID !== undefined || u.vendorBusinessId !== undefined) throw fail(409, 'Vendor assignment needs administrator review.');
+          const business = await tx.get(db().doc(`vendors/${a.vendorBusinessId}`));
+          const v = business.data();
+          if (!v || (v.id !== undefined && v.id !== a.vendorBusinessId) || v.status !== 'Active' || v.municipalScopeId !== scope) throw fail(409, 'Vendor business needs administrator ownership approval.');
+        } else if ([a, m, u].some(row => row.vendorBusinessId !== undefined || row.vendorID !== undefined)) {
+          throw fail(409, 'Only vendors can have a business assignment.');
+        }
         const permissions = a.staffPermissions ?? [], assigned = m.staffPermissions ?? [];
         if ([permissions, assigned].some(p => !Array.isArray(p) || p.length > STAFF_PERMISSIONS.length || new Set(p).size !== p.length || p.some(value => !STAFF_PERMISSIONS.includes(value))) ||
             permissions.length !== assigned.length || permissions.some(p => !assigned.includes(p)) ||
@@ -165,7 +174,7 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     if (!req.webUser || !adminUids.has(req.webUser.uid)) return res.status(403).json({ message: 'Web administrator access is required.' });
     next();
   });
-  router.get('/settings', (req, res) => res.json({ enabled: readEnabled && id(scope), canManageAccounts: enabled && id(scope), canDeactivate: readEnabled && id(scope), municipalScopeId: id(scope) ? scope : null, municipalityName, roles: [...roles], staffInspectorAvailable: readEnabled && id(scope) && activationEnabled }));
+  router.get('/settings', (req, res) => res.json({ enabled: readEnabled && id(scope), canManageAccounts: enabled && id(scope), canDeactivate: readEnabled && id(scope), municipalScopeId: id(scope) ? scope : null, municipalityName, roles: [...roles], staffInspectorAvailable: readEnabled && id(scope) && activationEnabled, canActivateAccounts: readEnabled && id(scope) && activationEnabled }));
   router.use((req, res, next) => {
     if (!readEnabled || !id(scope)) return res.status(503).json({ message: 'Account management is awaiting approved municipal setup.' });
     next();
@@ -264,12 +273,12 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     await store.prepare(account, req.webUser.uid);
     let recorded = false;
     try {
-      await firebase.createUser({ uid, email, displayName: fullName, password: randomBytes(32).toString('base64url'), disabled: true });
+      await firebase.createUser({ uid, email, displayName: fullName, password: randomBytes(32).toString('base64url'), disabled: true, emailVerified: false });
       await store.provision(account, req.webUser.uid); recorded = true;
       const existing = await firebase.getUser(uid);
       await firebase.setCustomUserClaims(uid, { ...existing.customClaims, municipalRole: body.role, municipalScopeId: scope });
       await firebase.updateUser(uid, { disabled: false });
-      account.status = body.role === 'vendor' ? 'active' : 'pending';
+      account.status = 'pending';
       await store.update(uid, { status: account.status }, account.status, req.webUser.uid, 'provisioned');
     } catch (failure) {
       // Never delete a possibly provisioned identity. Make partial work visible
@@ -288,7 +297,7 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
     res.json({ invitationStatus: await invite(a, req.webUser.uid) });
   }));
   router.post('/:uid/activate', writeGate('activation'), run(async (req, res) => {
-    if (!activationEnabled) throw fail(503, 'Staff activation is awaiting approved municipal setup.');
+    if (!activationEnabled) throw fail(503, 'Mobile activation is awaiting approved municipal setup.');
     if (Object.keys(req.body || {}).length) throw fail(400, 'Activation requests do not accept account changes.');
     const a = await owned(req.params.uid);
     await store.activate(a.uid, scope, req.webUser.uid, async account => {
@@ -298,7 +307,7 @@ export function createAccountsRouter({ getAuth, store, enabled = false, activati
       if (!identity || identity.uid !== account.uid || identity.disabled !== false || identity.email !== account.email ||
           identity.customClaims?.municipalRole !== account.role || identity.customClaims?.municipalScopeId !== scope) throw fail(409, 'Account identity needs administrator review.');
     });
-    res.json({ success: true, message: 'Mobile access activated with the existing role and assigned functions.' });
+    res.json({ success: true, message: 'Membership approved with the existing role and assigned functions. Access also requires Firebase email verification.' });
   }));
   router.post('/:uid/permissions', writeGate('accountManagement'), run(async (req, res) => {
     const b = req.body || {}, permissions = b.staffPermissions;
