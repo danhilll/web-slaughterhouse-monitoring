@@ -23,6 +23,17 @@ const validInspection = a => ['pending','approved','rejected'].includes(a.inspec
 // stored records before returning a successful response; never fabricate audit evidence.
 const validRecord = a => validCarcassEstimate(a.carcassEstimate,a.weightGrams,a.revision) && validCarcass(a.carcassWeight) && (!a.carcassWeight || a.carcassWeight.animalRevision<=a.revision) && validId(a.id) && validId(a.municipalScopeId) && validId(a.vendorBusinessId) && ['Cow','Pig'].includes(a.species) && Number.isSafeInteger(a.weightGrams) && a.weightGrams>0 && timestamp(a.weighedAt) && text(a.identifier,80) && ['manual','rfid'].includes(a.identifierType) && Number.isSafeInteger(a.revision) && a.revision>0 && validInspection(a) && timestamp(a.createdAt) && validId(a.createdBy) && timestamp(a.updatedAt) && validId(a.updatedBy);
 const inventory = p => p.role === 'admin' || (p.role === 'staff' && p.staffPermissions.includes('inventory'));
+const animalReader = p => ['admin','vendor','inspector'].includes(p.role) || p.role === 'staff' && p.staffPermissions.some(permission => STAFF_PERMISSIONS.includes(permission));
+const historyReader = p => ['admin','inspector'].includes(p.role) || inventory(p);
+const restrictedReader = p => p.role === 'staff' && animalReader(p) && !inventory(p);
+const readView = (a,p) => {
+  if (!restrictedReader(p)) return view(a);
+  const full = view(a);
+  const fields = ['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','updatedAt','carcassWeightLocked','carcassEstimate','carcassWeightSelection'];
+  return {...Object.fromEntries(fields.map(key=>[key,full[key]])),projection:'staff_read_only_v1',
+    inspection:Object.fromEntries(['status','revision','decidedAt'].filter(key=>full.inspection[key]!==undefined).map(key=>[key,full.inspection[key]])),
+    carcassWeight:full.carcassWeight?Object.fromEntries(carcassKeys.filter(key=>key!=='recordedBy').map(key=>[key,full.carcassWeight[key]])):null};
+};
 const readable = (a,p) => a?.municipalScopeId === p.municipalScopeId && (p.role !== 'vendor' || a.vendorBusinessId === p.vendorBusinessId);
 function validateDetails(b) {
   if (!validId(b.vendorBusinessId) || !['Cow','Pig'].includes(b.species) || !Number.isSafeInteger(b.weightGrams) || b.weightGrams <= 0 || !timestamp(b.weighedAt) || Date.parse(b.weighedAt) > Date.now()+60000) throw fail(400,'Provide a vendor, species, positive weight in grams and a valid weighing time.');
@@ -122,7 +133,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
   const recordEnabled=production?production.features.animals:enabled;
   const inspectionEnabled=production?production.features.inspection:enabled;
   // Only the isolated rehearsal adapter opts in. No production environment flag enables this.
-  router.get('/settings',(req,res)=>res.json({enabled:readEnabled,canRecord:recordEnabled&&inventory(req.animalPrincipal),canInspect:inspectionEnabled&&req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false,carcassWeightEnabled:!production&&enabled&&carcassWeightEnabled===true,canRecordCarcassWeight:!production&&enabled&&carcassWeightEnabled===true&&inventory(req.animalPrincipal),carcassDefinitionStatus:'awaiting_confirmation'}));
+  router.get('/settings',(req,res)=>res.json({enabled:readEnabled,canRead:readEnabled&&animalReader(req.animalPrincipal),canReadHistory:readEnabled&&historyReader(req.animalPrincipal),animalReadOnly:readEnabled&&restrictedReader(req.animalPrincipal),canRecord:recordEnabled&&inventory(req.animalPrincipal),canInspect:inspectionEnabled&&req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false,carcassWeightEnabled:!production&&enabled&&carcassWeightEnabled===true,canRecordCarcassWeight:!production&&enabled&&carcassWeightEnabled===true&&inventory(req.animalPrincipal),carcassDefinitionStatus:'awaiting_confirmation'}));
   router.use((req,res,next)=>readEnabled?next():res.status(503).json({message:'Animal workflow is awaiting pilot activation.'}));
   const writeGate=feature=>(req,res,next)=>production&&production.features[feature]!==true
     ?res.status(503).json({message:'This production recording capability is paused.'}):next();
@@ -137,7 +148,6 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     let parsed;try{parsed=JSON.parse(Buffer.from(data,'base64url').toString());}catch{throw fail(400,'Invalid page cursor.');}
     if(parsed.binding!==binding(p,kind)||!validId(parsed.after)||!Number.isFinite(parsed.expires)||parsed.expires<=Date.now())throw fail(400,'Invalid page cursor.');return parsed.after;
   };
-  const allowedRead=p=>p.role==='admin'||p.role==='vendor'||p.role==='inspector'||inventory(p);
   const get=async(req)=>{const a=await store.get(req.params.id);if(!readable(a,req.animalPrincipal))throw fail(404,'Animal record not found.');if(!validRecord(a))throw fail(503,'Animal record requires administrator review.');return a;};
   router.get('/vendors',run(async(req,res)=>{
     const p=req.animalPrincipal;if(!inventory(p))throw fail(403,'Inventory permission is required to select vendor businesses.');
@@ -148,12 +158,12 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     res.json({items,nextCursor:rows.length>25?encode(p,items.at(-1).id,'vendors'):null});
   }));
   router.get('/',run(async(req,res)=>{
-    const p=req.animalPrincipal;if(!allowedRead(p))throw fail(403,'Your staff assignment does not include animal inventory.');
+    const p=req.animalPrincipal;if(!animalReader(p))throw fail(403,'Your staff assignment does not include animal record access.');
     if(Object.keys(req.query).some(k=>k!=='cursor'))throw fail(400,'Unsupported animal filter.');
     const after=req.query.cursor!==undefined?decode(req.query.cursor,p):undefined;const rows=await store.list(p,after);
     if(!Array.isArray(rows)||rows.length>26||rows.some(a=>!readable(a,p)||!validRecord(a)))throw fail(503,'Animal records require administrator review.');
     for(let i=0;i<rows.length;i++){const previous=i?rows[i-1].id:after;if(previous&&Buffer.compare(Buffer.from(previous),Buffer.from(rows[i].id))>=0)throw fail(503,'Animal page ordering requires review.');}
-    const items=rows.slice(0,25);res.json({items:items.map(view),nextCursor:rows.length>25?encode(p,items.at(-1).id):null});
+    const items=rows.slice(0,25);res.json({items:items.map(a=>readView(a,p)),nextCursor:rows.length>25?encode(p,items.at(-1).id):null});
   }));
   router.get('/:id/vendor',run(async(req,res)=>{
     const p=req.animalPrincipal;
@@ -161,8 +171,8 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     if(Object.keys(req.query).length)throw fail(400,'Vendor identity does not accept filters.');
     res.json(await store.inspectorVendor(req.params.id,p));
   }));
-  router.get('/:id/history',run(async(req,res)=>{if(!['admin','inspector'].includes(req.animalPrincipal.role)&&!inventory(req.animalPrincipal))throw fail(403,'Animal audit history is restricted to authorized personnel.');const a=await get(req);res.json({items:await store.history(a.id,req.animalPrincipal.municipalScopeId)});}));
-  router.get('/:id',run(async(req,res)=>{if(!allowedRead(req.animalPrincipal))throw fail(403,'Animal access is unavailable.');res.json(view(await get(req)));}));
+  router.get('/:id/history',run(async(req,res)=>{if(!historyReader(req.animalPrincipal))throw fail(403,'Animal audit history is restricted to authorized personnel.');const a=await get(req);res.json({items:await store.history(a.id,req.animalPrincipal.municipalScopeId)});}));
+  router.get('/:id',run(async(req,res)=>{if(!animalReader(req.animalPrincipal))throw fail(403,'Animal access is unavailable.');res.json(readView(await get(req),req.animalPrincipal));}));
   router.post('/',writeGate('animals'),run(async(req,res)=>{
     const p=req.animalPrincipal;if(!inventory(p))throw fail(403,'Inventory recording permission is required.');
     const b=req.body||{};if(Object.keys(b).some(k=>!['vendorBusinessId','species','weightGrams','weighedAt','identifier','identifierType'].includes(k))||!text(b.identifier,80)||!['manual','rfid'].includes(b.identifierType))throw fail(400,'Provide a manual or RFID animal identifier and supported fields.');

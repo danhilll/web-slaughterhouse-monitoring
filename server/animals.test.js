@@ -55,7 +55,7 @@ test('workflow gate, authentication and staff function separation deny unauthori
   const {call,state}=await fixture(t,false);assert.equal((await call('','inventory','POST',input)).status,503);assert.equal(state.animals.size,0);
   assert.equal((await call('',null)).status,401);assert.equal((await call('','expired')).status,401);
 });
-test('only inventory staff or web administrator records an animal; billing and delivery permissions grant no inventory access',async t=>{
+test('only inventory staff or web administrator records an animal; billing and delivery read permissions grant no inventory writes',async t=>{
   const {call,state}=await fixture(t);
   for(const token of ['billing','delivery','alice','inspector'])assert.equal((await call('',token,'POST',input)).status,403);
   const r=await call('','inventory','POST',input);assert.equal(r.status,201);assert.equal(r.body.inspection.status,'pending');assert.equal(r.body.createdBy,'inventory');assert.equal(animalBillingEligible(r.body),false);
@@ -274,7 +274,7 @@ test('production rollback keeps animal reads scoped and closes every recording p
   assert.equal((await call(`/${created.body.id}`,'alice')).status,200);
   assert.equal((await call(`/${created.body.id}`,'bob')).status,404);
   assert.equal((await call('','other')).status,403);
-  assert.equal((await call('','billing')).status,403);
+  assert.equal((await call('','billing')).status,200);
   for(const path of ['',`/${created.body.id}/correction`,`/${created.body.id}/inspection`,`/${created.body.id}/carcass-weight`])assert.equal((await call(path,'inventory','POST',{})).status,503);
   state.memberships.inventory.status='inactive';assert.equal((await call()).status,403);
 });
@@ -295,4 +295,79 @@ test('stable production animal cursors survive another router instance and retai
   const first=await a.call();assert.equal(first.body.items.length,25);assert.ok(first.body.nextCursor);
   assert.equal((await b.call(`?cursor=${encodeURIComponent(first.body.nextCursor)}`)).body.items.length,1);
   assert.equal((await b.call(`?cursor=${encodeURIComponent(first.body.nextCursor)}`,'alice')).status,400);
+});
+
+for (const who of ['billing','delivery']) {
+  test(`${who} reads municipal animals before invoices/assignments without mutation or private lookup access`,async t=>{
+    const production={municipalScopeId:'SCOPE-A',features:{animals:true,inspection:true,carcass:true}};
+    const {call,state}=await fixture(t,true,production);
+    const a=(await call('','inventory','POST',input)).body;
+    const b=(await call('','inventory','POST',{...input,identifier:'TAG-B',vendorBusinessId:'VEN-B'})).body;
+    const c=(await call('','inventory','POST',{...input,identifier:'TAG-C'})).body;
+    state.animals.get(b.id).inspection={status:'approved',revision:1,inspectorUid:'inspector',decidedAt:'2020-01-01T09:00:00.000Z',notes:'Synthetic findings'};
+    state.animals.get(c.id).inspection={status:'rejected',revision:1,inspectorUid:'inspector',decidedAt:'2020-01-01T09:00:00.000Z',notes:'Synthetic findings'};
+    const foreign={...structuredClone(state.animals.get(a.id)),id:'FOREIGN',municipalScopeId:'SCOPE-B'};state.animals.set(foreign.id,foreign);
+    const before=structuredClone([...state.animals]),events=state.events.length;
+    const settings=(await call('/settings',who)).body;
+    assert.equal(settings.canRead,true);assert.equal(settings.canReadHistory,false);
+    for(const flag of ['canRecord','canInspect','canRecordCarcassWeight'])assert.equal(settings[flag],false);
+    const page=await call('',who);assert.equal(page.status,200);assert.equal(page.body.items.length,3);
+    assert.deepEqual(new Set(page.body.items.map(a=>a.inspection.status)),new Set(['pending','approved','rejected']));
+    assert.ok(page.body.items.every(a=>a.municipalScopeId==='SCOPE-A'));
+    assert.equal((await call(`/${a.id}`,who)).status,200);
+    assert.equal((await call('/FOREIGN',who)).status,404);
+    for(const suffix of ['/vendors',`/${a.id}/vendor`,`/${a.id}/history`])assert.equal((await call(suffix,who)).status,403);
+    for(const suffix of ['',`/${a.id}/correction`,`/${a.id}/inspection`,`/${a.id}/carcass-weight`])assert.equal((await call(suffix,who,'POST',{})).status,403);
+    for(const filter of ['municipalScopeId=SCOPE-B','vendorBusinessId=VEN-A','status=approved'])assert.equal((await call('?'+filter,who)).status,400);
+    assert.deepEqual([...state.animals],before);assert.equal(state.events.length,events);
+    assert.equal((await call('', 'alice')).body.items.length,2);
+    assert.equal((await call(`/${b.id}`,'alice')).status,404);
+  });
+  test(`${who} read access survives paused writes and rejects unverified, revoked and unassigned membership`,async t=>{
+    const production={municipalScopeId:'SCOPE-A',features:{animals:false,inspection:false,carcass:false}};
+    const {call,state}=await fixture(t,true,production);
+    assert.equal((await call('/settings',who)).body.canRead,true);
+    assert.equal((await call('/settings','inventory')).body.canReadHistory,true);
+    assert.equal((await call('/settings','inspector')).body.canReadHistory,true);
+    assert.equal((await call('',who)).status,200);
+    state.claimOverrides[who]={email_verified:false};assert.equal((await call('',who)).status,403);
+    state.claimOverrides[who]={};state.memberships[who].status='inactive';assert.equal((await call('',who)).status,403);
+    state.memberships[who].status='active';state.memberships[who].staffPermissions=[];
+    assert.equal((await call('/settings',who)).body.canRead,false);assert.equal((await call('',who)).status,403);
+  });
+}
+test('read-only staff cursors remain bounded, per-account and tamper-proof',async t=>{
+  const {call}=await fixture(t);
+  for(let i=0;i<26;i++)assert.equal((await call('','inventory','POST',{...input,identifier:`READ-${i}`})).status,201);
+  const first=await call('','billing');assert.equal(first.body.items.length,25);assert.ok(first.body.nextCursor);
+  const cursor=encodeURIComponent(first.body.nextCursor);
+  assert.equal((await call('?cursor='+cursor,'billing')).body.items.length,1);
+  assert.equal((await call('?cursor='+cursor,'delivery')).status,400);
+  assert.equal((await call('?cursor='+encodeURIComponent(first.body.nextCursor+'x'),'billing')).status,400);
+});
+
+for(const who of ['billing','delivery'])test(`${who} API projection removes notes and all actors from lists and measured details`,async t=>{
+  const {call,state}=await fixture(t);
+  const created=(await call('','inventory','POST',input)).body;
+  const stored=state.animals.get(created.id);
+  stored.inspection={status:'approved',revision:1,inspectorUid:'PRIVATE-INSPECTOR',decidedAt:'2020-01-01T09:00:00.000Z',notes:'PRIVATE-NOTES'};
+  stored.carcassWeight={weightGrams:65000,weighedAt:'2020-01-01T10:00:00.000Z',revision:1,animalRevision:1,recordedAt:'2020-01-01T10:01:00.000Z',recordedBy:'PRIVATE-ACTOR'};
+  const before=structuredClone(stored),events=state.events.length;
+  const settings=(await call('/settings',who)).body;assert.equal(settings.animalReadOnly,true);assert.equal(settings.canReadHistory,false);
+  for(const result of [(await call('',who)).body.items[0],(await call(`/${created.id}`,who)).body]){
+    assert.equal(result.projection,'staff_read_only_v1');
+    assert.deepEqual(Object.keys(result).sort(),['id','municipalScopeId','vendorBusinessId','identifier','identifierType','species','weightGrams','weighedAt','revision','createdAt','updatedAt','carcassWeightLocked','carcassEstimate','carcassWeightSelection','projection','inspection','carcassWeight'].sort());
+    assert.deepEqual(Object.keys(result.inspection).sort(),['status','revision','decidedAt'].sort());
+    assert.deepEqual(Object.keys(result.carcassWeight).sort(),['weightGrams','weighedAt','revision','animalRevision','recordedAt'].sort());
+    assert.equal(result.carcassWeightSelection.source,'measured');assert.equal(result.carcassWeight.weightGrams,65000);
+    assert.equal(result.carcassEstimate.weightGrams,68000);assert.equal(result.weighedAt,stored.weighedAt);
+    for(const secret of ['PRIVATE-NOTES','PRIVATE-INSPECTOR','PRIVATE-ACTOR',stored.createdBy])assert.equal(JSON.stringify(result).includes(secret),false);
+  }
+  for(const fullRole of ['inventory','inspector','alice']){
+    const full=(await call(`/${created.id}`,fullRole)).body;
+    assert.equal(full.projection,undefined);assert.equal(full.createdBy,stored.createdBy);assert.equal(full.inspection.notes,'PRIVATE-NOTES');assert.equal(full.carcassWeight.recordedBy,'PRIVATE-ACTOR');
+    assert.equal((await call('/settings',fullRole)).body.animalReadOnly,false);
+  }
+  assert.equal((await call(`/${created.id}/history`,who)).status,403);
+  assert.deepEqual(stored,before);assert.equal(state.events.length,events);
 });
