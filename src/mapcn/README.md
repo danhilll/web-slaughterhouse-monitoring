@@ -1,0 +1,14 @@
+# MAPCN delivery renderer
+
+Source: https://github.com/AnmolSaini16/mapcn at d98f98fdc309153a2ab24eeb5c6335ba2e6bf6bb.
+Use exact MapLibre 6.4.1 (GHSA-jrc7-96c5-q579 fix). Keep MAPCN MIT, MapLibre BSD and bundled transitive notices in public/mapcn-licenses. Local vendor changes are provenance, cn import and bundled-worker URL only.
+
+DeliveryTrackingPanel retains API polling, authorization, access-loss clearing and visibility ownership. DeliveryMap sends only latitude, longitude and accuracyMeters through an exact-origin/source message boundary to mapcn.html. The renderer rejects extra keys and invalid/non-finite positions; shared accuracy range is 0..1000 metres, matching the supported server write contract. Null clears the map. There is no API client, native callable interface, location capture, arbitrary HTML, arbitrary URL, geocoding, business/stall geography or write action in this renderer.
+
+Both themes explicitly use the existing OSM raster style. Never activate MAPCN default CARTO styles. The renderer document denies application API connections, external scripts and eval through CSP. The independently served bundled worker receives its own CSP through server/hosting.js; document meta CSP alone does not protect a worker. Restrict tile requests to HTTPS tile.openstreetmap.org, zoom 0..19 and valid tile coordinates, with no credentials/query/fragment. Referrer policy sends only the web origin; cross-origin requests omit credentials. No account or invoice data is supplied to the renderer.
+
+Keep attribution visible, including in the no-position and error states. Disclose that tile requests reveal the viewed area. Use browser default HTTP caching; do not add cache-bypass headers, bulk downloads, offline/prefetch features or background map loading. No automatic geolocation or routing is implemented. OSM is best-effort and may withdraw service. Policy: https://operations.osmfoundation.org/policies/tiles/ . Android must additionally verify its app-identifying User-Agent and real WebView cache/worker behavior.
+
+The parent unmounts maps when hidden, closed, invoice changes or authorization removes the location. The renderer also clears on document hiding. Temporary network errors retain the existing workspace's last-received coordinates and status; a map is not proof of arrival. The accuracy area is a display approximation, not an animal/vendor location or movement route.
+
+Focused desktop Chromium software-WebGL2 and intercepted synthetic-tile checks do not establish Android WebView, live provider cache/header or physical-device acceptance. The combined candidate remains held until actual Android host acceptance is authorized and passed. No production gates are enabled by these files.

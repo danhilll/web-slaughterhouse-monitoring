@@ -13,6 +13,7 @@ async function fixture(t, enabled = true) {
   await mkdir(join(directory, 'assets'));
   await writeFile(join(directory, 'index.html'), '<html><body>Login shell</body></html>');
   await writeFile(join(directory, 'assets', 'app-test.js'), 'console.log("test asset")');
+  await writeFile(join(directory, 'assets', 'maplibre-gl-worker-fixture.js'), 'self.onmessage = () => {};');
   await writeFile(join(directory, '.env'), 'private test value');
   const app = express(); let ready = false;
   registerReadiness(app, () => ready);
@@ -58,4 +59,16 @@ test('missing assets and dotfiles do not fall through to the login shell', async
 test('web asset hosting stays opt-in and rejects a missing build when enabled', async t => {
   const f = await fixture(t, false); assert.equal((await f.get('/operations')).status, 404);
   assert.throws(() => registerWebAssets(express(), { enabled: true, directory: join(tmpdir(), 'absent-build-for-municipal-test') }), /built dist/);
+});
+
+test('bundled MapLibre worker receives its own network and script CSP without weakening app policy', async t => {
+ const f=await fixture(t);
+ const worker=await f.get('/assets/maplibre-gl-worker-fixture.js');
+ assert.equal(worker.status,200);
+ const policy=worker.headers.get('content-security-policy');
+ assert.match(policy,/default-src 'none'/);assert.match(policy,/script-src 'self'/);
+ assert.match(policy,/connect-src https:\/\/tile.openstreetmap.org;/);
+ assert.doesNotMatch(policy,/unsafe-eval|unpkg|carto|connect-src 'self'/);
+ assert.equal(worker.headers.get('referrer-policy'),'origin');
+ assert.equal((await f.get('/assets/app-test.js')).headers.get('content-security-policy'),null);
 });
