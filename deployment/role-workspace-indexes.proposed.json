@@ -1,0 +1,7 @@
+{
+  "indexes": [
+    {"collectionGroup":"invoices","queryScope":"COLLECTION","fields":[{"fieldPath":"municipalScopeId","order":"ASCENDING"},{"fieldPath":"workflow","order":"ASCENDING"},{"fieldPath":"delivery.assigneeUid","order":"ASCENDING"},{"fieldPath":"__name__","order":"ASCENDING"}]},
+    {"collectionGroup":"invoices","queryScope":"COLLECTION","fields":[{"fieldPath":"municipalScopeId","order":"ASCENDING"},{"fieldPath":"workflow","order":"ASCENDING"},{"fieldPath":"delivery.status","order":"ASCENDING"},{"fieldPath":"__name__","order":"ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}

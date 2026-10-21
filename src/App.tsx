@@ -631,7 +631,8 @@ function DashboardLayout({
     { label: 'Vendors', to: '/vendors', icon: Users },
     { label: 'Mobile Users', to: '/users', icon: ShieldCheck },
     { label: 'Animal Register', to: '/animals', icon: ClipboardList },
-    { label: 'Animal Billing & Delivery', to: '/operations', icon: ClipboardList },
+    { label: 'Billing Workspace', to: '/billing', icon: FileText },
+    { label: 'Delivery Workspace', to: '/delivery', icon: ClipboardList },
     { label: 'Notifications', to: '/notifications', icon: Bell, badge: unreadCount },
     { label: 'Service Computation', to: '/service-computation', icon: PiggyBank }
   ];
@@ -644,7 +645,10 @@ function DashboardLayout({
     '/vendors': 'Vendors',
     '/users': 'Mobile Users',
     '/animals': 'Animal Register',
-    '/operations': 'Animal Billing & Delivery',
+    '/animal-records': 'Animal Records (Read-only)',
+    '/operations': 'Billing and Delivery Workspaces',
+    '/billing': 'Billing Workspace',
+    '/delivery': 'Delivery Workspace',
     '/notifications': 'Notifications',
     '/service-computation': 'Service Computation'
   };
@@ -652,6 +656,10 @@ function DashboardLayout({
   const pageDescriptions: Record<string, string> = {
     '/': 'A complete picture of your municipal operations.',
     '/records': 'Track livestock intake and daily slaughter activity.',
+    '/animal-records': 'Read animal records without registration, correction or carcass controls.',
+    '/billing': 'Review eligible animals, vendor-linked invoices and recorded balances.',
+    '/delivery': 'Review authorized assignments, destinations and meat details.',
+    '/operations': 'Open the separate Billing and Delivery workspaces.',
     '/invoices': 'Keep billing, payments, and outstanding balances in view.',
     '/statistics': 'Explore the numbers behind your operations.',
     '/vendors': 'Your vendor directory, organized in one place.',
@@ -782,7 +790,10 @@ function DashboardLayout({
               <Route path="/notifications" element={<NotificationsPage notifications={notifications} markNotificationRead={markNotificationRead} markAllNotificationsRead={markAllNotificationsRead} deleteNotification={deleteNotification} />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/animals" element={<AnimalsPage />} />
+              <Route path="/animal-records" element={<AnimalsPage key="animal-reference" readOnly />} />
 <Route path="/operations" element={<OperationsPage />} />
+              <Route path="/billing" element={<OperationsPage key="billing" workspace="billing" />} />
+              <Route path="/delivery" element={<OperationsPage key="delivery" workspace="delivery" />} />
               <Route path="/service-computation" element={<ServiceComputationPage feeConfig={feeConfig} updateFees={updateFees} showToast={showToast} />} />
             </Routes>
             </div>

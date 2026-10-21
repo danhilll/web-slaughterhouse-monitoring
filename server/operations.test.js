@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { createOperationsStore, createOperationsRouter, syntheticOperationsEnabled } from './operations.js';
+import { createOperationsStore, createOperationsRouter, syntheticOperationsEnabled, operationBillingView } from './operations.js';
 import { createAnimalMobileAuth } from './animals.js';
 
 const fees={status:'approved',version:1,basis:'perAnimal',currency:'PHP',corralCents:1500,deliveryCents:2500,inspectionCents:1000,facilityCents:4500,syntheticOnly:true};
@@ -20,19 +20,19 @@ async function fixture(t,enabled=true,now=()=>new Date().toISOString(),productio
   const rows=new Map();let sequence=0,queue=Promise.resolve();
   const snap=ref=>({exists:rows.has(ref.path),id:ref.path.split('/').at(-1),data:()=>structuredClone(rows.get(ref.path))});
   const doc=path=>({path,get:async()=>snap({path})});
-  const db={doc,collection:path=>({doc:()=>doc(`${path}/EVENT-${++sequence}`),where(field,op,value){const filters=[[field,value]];const q={where:(f,o,v)=>{filters.push([f,v]);return q;},orderBy:()=>q,startAfter:value=>{q.after=value;return q;},limit:n=>{q.limit=n;return q;},get:async()=>({docs:[...rows].filter(([key,row])=>key.startsWith(path+'/')&&filters.every(([f,v])=>row[f]===v)&&(!q.after||key.split('/').at(-1)>q.after)).sort(([a],[b])=>a<b?-1:1).slice(0,q.limit).map(([path])=>snap({path}))})};return q;}}),runTransaction(fn){const result=queue.then(async()=>{const writes=[];const tx={get:async ref=>snap(ref),create:(ref,row)=>{if(rows.has(ref.path))throw Error('Already exists');writes.push([ref.path,row]);},set:(ref,row)=>writes.push([ref.path,row]),update:(ref,patch)=>writes.push([ref.path,{...rows.get(ref.path),...patch}])};const value=await fn(tx);for(const [path,row] of writes)rows.set(path,structuredClone(row));return value;});queue=result.catch(()=>{});return result;}};
-  const memberships={billing:{role:'staff',staffPermissions:['billing']},delivery:{role:'staff',staffPermissions:['delivery']},delivery2:{role:'staff',staffPermissions:['delivery']},inventory:{role:'staff',staffPermissions:['inventory']},inspector:{role:'inspector'},alice:{role:'vendor',vendorBusinessId:'VEN-A'},bob:{role:'vendor',vendorBusinessId:'VEN-B'},other:{role:'staff',staffPermissions:['billing'],municipalScopeId:'OTHER'}};
+  const db={doc,collection:path=>({doc:()=>doc(`${path}/EVENT-${++sequence}`),where(field,op,value){const filters=[[field,op,value]];const q={where:(f,o,v)=>{filters.push([f,o,v]);return q;},orderBy:()=>q,startAfter:value=>{q.after=value;return q;},limit:n=>{q.limit=n;return q;},get:async()=>({docs:[...rows].filter(([key,row])=>key.startsWith(path+'/')&&filters.every(([f,o,v])=>{const actual=f.split('.').reduce((r,k)=>r?.[k],row);return o==='in'?v.includes(actual):actual===v;})&&(!q.after||key.split('/').at(-1)>q.after)).sort(([a],[b])=>a<b?-1:1).slice(0,q.limit).map(([path])=>snap({path}))})};return q;}}),runTransaction(fn){const result=queue.then(async()=>{const writes=[];const tx={get:async ref=>snap(ref),create:(ref,row)=>{if(rows.has(ref.path))throw Error('Already exists');writes.push([ref.path,row]);},set:(ref,row)=>writes.push([ref.path,row]),update:(ref,patch)=>writes.push([ref.path,{...rows.get(ref.path),...patch}])};const value=await fn(tx);for(const [path,row] of writes)rows.set(path,structuredClone(row));return value;});queue=result.catch(()=>{});return result;}};
+  const memberships={billing:{role:'staff',staffPermissions:['billing']},delivery:{role:'staff',staffPermissions:['delivery']},delivery2:{role:'staff',staffPermissions:['delivery']},multi:{role:'staff',staffPermissions:['billing','delivery']},inventory:{role:'staff',staffPermissions:['inventory']},inspector:{role:'inspector'},alice:{role:'vendor',vendorBusinessId:'VEN-A'},bob:{role:'vendor',vendorBusinessId:'VEN-B'},other:{role:'staff',staffPermissions:['billing'],municipalScopeId:'OTHER'},otherDelivery:{role:'staff',staffPermissions:['delivery'],municipalScopeId:'OTHER'}};
   for(const [uid,m] of Object.entries(memberships)){m.status='active';m.municipalScopeId??='SCOPE';rows.set(`mobile_memberships/${uid}`,m);}
   for(const value of ['A','B'])rows.set(`vendors/VEN-${value}`,{id:`VEN-${value}`,name:`Synthetic ${value}`,status:'Active',municipalScopeId:'SCOPE'});
   rows.set('operation_fee_schedules/SCOPE',structuredClone(fees));
   for(const value of ['A','B'])rows.set(`animal_records/ANM-${value}`,{id:`ANM-${value}`,vendorBusinessId:'VEN-A',municipalScopeId:'SCOPE',revision:1,inspection:{status:'approved',revision:1},species:'Pig',weightGrams:85001,identifier:`TEST-${value}`});
   const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,email_verified:true,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
-  const animalStore={membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
-  const store=createOperationsStore(()=>db),app=express();
+  const animalStore={get:async value=>rows.get('animal_records/'+value)??null,membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
+  const store=createOperationsStore(()=>db,{production:Boolean(production)}),app=express();
   app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:req=>req.animalUser}));
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const call=async(path,who='billing',body)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/operations${path}`,{method:body?'POST':'GET',headers:{...(who?{Authorization:`Bearer ${who}`} : {}),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
-  return {rows,memberships,call};
+  return {rows,memberships,call,store};
 }
 async function inTransit(f){const inv=(await f.call('/animals/ANM-A/invoice','billing',bill)).body;await f.call(`/invoices/${inv.id}/payment`,'billing',payment(1));await f.call(`/invoices/${inv.id}/delivery`,'delivery',{expectedRevision:2,assigneeUid:'delivery',destination:'Synthetic market'});await f.call(`/invoices/${inv.id}/delivery/status`,'delivery',{expectedRevision:3,status:'in_transit',notes:'Departed'});return inv.id;}
 
@@ -236,3 +236,62 @@ test('production rollback preserves invoice and tracking reads with all mutation
   for(const [path,who] of [['/animals/ANM-B/invoice','billing'],[`/invoices/${id}/payment`,'billing'],[`/invoices/${id}/delivery`,'delivery'],[`/invoices/${id}/delivery/status`,'delivery'],[`/invoices/${id}/tracking`,'delivery'],[`/invoices/${id}/delivery/location`,'delivery']])assert.equal((await f.call(path,who,{})).status,503);
   f.memberships.delivery.status='inactive';assert.equal((await f.call(`/invoices/${id}/tracking`,'delivery')).status,403);
 });
+
+test('paused gates retain distinct read workspace flags without granting writes or Vendor staff access',async t=>{
+ const production={municipalScopeId:'SCOPE',features:{billing:false,payment:false,delivery:false,tracking:false}};
+ const f=await fixture(t,false,undefined,production);
+ for(const [who,billing,delivery]of [['billing',true,false],['delivery',false,true],['multi',true,true],['alice',false,false]]){
+  const r=await f.call('/settings',who);assert.equal(r.status,200);assert.equal(r.body.workspaceContract,'billing_delivery_v1');
+  assert.equal(r.body.canReadBilling,billing);assert.equal(r.body.canReadEligible,billing);assert.equal(r.body.canReadDelivery,delivery);
+  for(const k of ['canBill','canDeliver','canRecordPayment','canPublishTracking'])assert.equal(r.body[k],false);
+ }
+ assert.equal((await f.call('/eligible','billing')).status,200);assert.equal((await f.call('/deliveries','billing')).status,403);assert.equal((await f.call('/eligible','delivery')).status,403);
+ assert.equal((await f.call('/deliveries','alice')).status,403);
+});
+test('Delivery sees only own municipal assignments; multi-permission Staff retain independent Billing scope',async t=>{
+ const f=await fixture(t),own=await inTransit(f);
+ const other=(await f.call('/animals/ANM-B/invoice','billing',bill)).body;
+ await f.call(`/invoices/${other.id}/payment`,'billing',{...payment(1),receiptReference:'SECOND'});
+ await f.call(`/invoices/${other.id}/delivery`,'delivery',{expectedRevision:2,assigneeUid:'delivery2',destination:'Recorded destination B'});
+ for(const a of ['A','B'])Object.assign(f.rows.get('animal_records/ANM-'+a),{weighedAt:'2026-10-20T01:00:00.000Z',inspection:{status:'approved',revision:1,notes:'PRIVATE INSPECTION',inspectorUid:'private-inspector'}});
+ const list=await f.call('/deliveries','delivery');assert.equal(list.status,200);assert.deepEqual(list.body.items.map(x=>x.id),[own]);
+ const item=list.body.items[0];assert.equal(item.projection,'delivery_assignment_v1');assert.equal(item.meatDetails.species,'Pig');assert.equal(item.meatDetails.carcassEstimate.weightGrams,68001);assert.equal(item.meatDetails.carcassWeight,null);
+ for(const field of ['payment','total_amount','totalCents','balanceCents','inspection','createdBy','updatedBy'])assert.ok(!(field in item));
+ assert.ok(!JSON.stringify(item).includes('PRIVATE INSPECTION'));assert.ok(!JSON.stringify(item).includes('private-inspector'));
+ assert.equal((await f.call('/deliveries/'+other.id,'delivery')).status,404);
+ assert.equal((await f.call('/deliveries/'+own,'otherDelivery')).status,404);assert.equal((await f.call('/deliveries','otherDelivery')).body.items.length,0);
+ const adminAssignments=await f.store.deliveries({role:'admin',uid:'admin',municipalScopeId:'SCOPE'});assert.equal(adminAssignments.length,2);
+ assert.equal((await f.call('/invoices/'+other.id,'delivery')).status,404);
+ assert.deepEqual((await f.call('/invoices','delivery')).body.items.map(x=>x.id),[own]);
+ assert.equal((await f.call('/invoices','multi')).body.items.length,2);assert.equal((await f.call('/deliveries','multi')).body.items.length,0);
+ assert.equal((await f.call('/invoices','bob')).body.items.length,0);
+ const next=await f.call('/deliveries/'+own+'/status','delivery',{expectedRevision:4,status:'delivered',notes:'Confirmed received'});
+ assert.equal(next.status,200);assert.equal(next.body.delivery.status,'delivered');assert.equal(next.body.projection,'delivery_assignment_v1');assert.ok(!('payment' in next.body));
+ assert.equal((await f.call('/deliveries/'+own+'/status','delivery',{expectedRevision:4,status:'delivered',notes:'Again'})).status,409);
+ assert.ok([...f.rows.values()].some(x=>x.action==='delivery_status'&&x.after?.revision===5));
+});
+test('Delivery cursor bindings reject another account and Billing endpoint; request filters fail closed',async t=>{
+ const f=await fixture(t),id=await inTransit(f),base=f.rows.get('invoices/'+id);
+ f.rows.delete('invoices/'+id);
+ for(let i=0;i<27;i++)f.rows.set('invoices/INV-'+String(i).padStart(3,'0'),{...structuredClone(base),id:'INV-'+String(i).padStart(3,'0')});
+ const first=await f.call('/deliveries','delivery');assert.equal(first.status,200);assert.equal(first.body.items.length,25);assert.ok(first.body.nextCursor);
+ const next=await f.call('/deliveries?cursor='+encodeURIComponent(first.body.nextCursor),'delivery');assert.equal(next.body.items.length,2);
+ assert.equal((await f.call('/deliveries?cursor='+encodeURIComponent(first.body.nextCursor),'delivery2')).status,400);
+ assert.equal((await f.call('/invoices?cursor='+encodeURIComponent(first.body.nextCursor),'delivery')).status,400);
+ assert.equal((await f.call('/deliveries?assigneeUid=delivery2','delivery')).status,400);
+});
+test('production invoice issuance rejects synthetic/unproven fees and stores immutable approved fee snapshot',async t=>{
+ const f=await fixture(t,true,undefined,{municipalScopeId:'SCOPE',features:{billing:true,payment:false,delivery:false,tracking:false}});
+ assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,503);
+ const s=f.rows.get('operation_fee_schedules/SCOPE');s.syntheticOnly=false;
+ assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,503);
+ s.approvalReference='OWNER-APPROVED-TEST-REFERENCE';
+ const issued=await f.call('/animals/ANM-A/invoice','billing',bill);assert.equal(issued.status,201);const priced=(await f.call('/billing/invoices/'+issued.body.id,'billing')).body;assert.equal(priced.totalCents,9500);assert.equal(priced.paidCents,0);assert.equal(priced.balanceCents,9500);assert.equal(priced.feeScheduleSnapshot.approvalReference,s.approvalReference);
+ assert.equal((await f.call('/billing/invoices','alice')).status,403);assert.equal((await f.call('/billing/invoices','delivery')).status,403);
+ s.facilityCents=6000;s.version=2;
+ const again=await f.call('/billing/invoices/'+issued.body.id,'billing');assert.equal(again.body.feeScheduleSnapshot.facilityCents,4500);assert.equal(again.body.totalCents,9500);
+ assert.equal((await f.call('/invoices/'+issued.body.id+'/payment','billing',payment(1))).status,503);
+ assert.equal((await f.call('/deliveries/'+issued.body.id+'/status','delivery',{expectedRevision:1,status:'in_transit',notes:'No assignment'})).status,503);
+});
+
+test('new Billing projection never copies legacy delivery coordinates into its workspace response',()=>{const row={totalCents:9500,payment_status:'Unpaid',delivery:{assigneeUid:'D',destination:'Recorded',status:'assigned',location:{latitude:1,longitude:2,accuracyMeters:3,capturedAt:'2026-10-21T01:00:00Z'}}};const view=operationBillingView(row);assert.equal(view.balanceCents,9500);assert.ok(!('location' in view.delivery));assert.ok(row.delivery.location);});

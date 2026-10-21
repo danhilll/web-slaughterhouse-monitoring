@@ -670,7 +670,7 @@ registerReadiness(app, () => useFirestore && Boolean(firebaseAuth));
 const animalStore = createAnimalStore(() => firestoreDb);
 const animalWorkflowEnabled = process.env.ANIMAL_WORKFLOW_ENABLED === 'true';
 const operationsEnabled = () => syntheticOperationsEnabled(process.env, firestoreDb?.projectId);
-const operationsStore = createOperationsStore(() => firestoreDb);
+const operationsStore = createOperationsStore(() => firestoreDb, { production: Boolean(production) });
 app.use('/api/mobile/operations', express.json({ limit: '16kb' }), createAnimalMobileAuth(() => firebaseAuth, animalStore),
   createOperationsRouter({ store: operationsStore, animalStore, enabled: () => animalWorkflowEnabled && operationsEnabled(), ...routerConfig('operations'), getPrincipal: req => req.animalUser }));
 const municipalScope = process.env.MUNICIPAL_SCOPE_ID || 'ph-quezon-calauag';

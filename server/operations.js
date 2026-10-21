@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
 import { createTrackingStore } from './tracking.js';
+import { deliveryOnly, deliveryReadable, deliveryAssignmentView } from './operation-workspaces.js';
 import { isValidHeadcount } from './headcounts.js';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -23,6 +24,13 @@ export const operationInvoiceView = row => {
   if(row.delivery){result.delivery=pick(row.delivery,['assigneeUid','destination','status','notes','assignedAt','updatedAt','deliveredAt']);if(row.delivery.location)result.delivery.location=pick(row.delivery.location,['latitude','longitude','accuracyMeters','capturedAt','receivedAt']);}
   return result;
 };
+export const operationBillingView = row => {
+  const visible=operationInvoiceView(row);
+  // Billing uses the recorded invoice, not the assigned delivery's location channel.
+  if(visible.delivery)delete visible.delivery.location;
+  return {...visible,totalCents:row.totalCents,paidCents:row.payment_status==='Paid'?row.payment.amountCents:0,balanceCents:row.payment_status==='Paid'?0:row.totalCents,
+    ...(row.feeScheduleSnapshot?{feeScheduleSnapshot:Object.fromEntries(['version','basis','currency','corralCents','deliveryCents','inspectionCents','facilityCents','syntheticOnly','approvalReference'].filter(k=>row.feeScheduleSnapshot[k]!==undefined).map(k=>[k,row.feeScheduleSnapshot[k]]))}:{})};
+};
 const validInvoice = row => id(row?.id) && row.workflow==='animal' && id(row.vendor_id) && id(row.animalId) && id(row.municipalScopeId) && Number.isSafeInteger(row.animalRevision) && row.animalRevision>0 && Number.isSafeInteger(row.revision) && row.revision > 0 && money(row.totalCents) && row.totalCents > 0 && ['Unpaid','Paid'].includes(row.payment_status) && day(row.date_issued) && day(row.due_date) &&
   ['number_of_heads_cow','number_of_heads_pig'].every(key=>isValidHeadcount(row[key])) &&
   ['corral_fee','delivery_fee','anti_mortem_fee','facility_fee','total_amount'].every(key=>typeof row[key]==='number'&&Number.isFinite(row[key])&&row[key]>=0) && row.total_amount===row.totalCents/100 &&
@@ -35,13 +43,14 @@ export function syntheticOperationsEnabled(env, projectId) {
     [env.GCLOUD_PROJECT,env.GOOGLE_CLOUD_PROJECT].every(value=>!value||value===projectId) &&
     [env.FIREBASE_AUTH_EMULATOR_HOST,env.FIRESTORE_EMULATOR_HOST].every(value=>typeof value==='string'&&/^127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(value));
 }
-function scheduleView(s) {
+function scheduleView(s, production = false) {
   if (!s || s.status !== 'approved' || !Number.isSafeInteger(s.version) || s.version < 1 || s.basis !== 'perAnimal' || s.currency !== 'PHP' || !['corralCents','deliveryCents','inspectionCents','facilityCents'].every(key => money(s[key])) || s.corralCents+s.deliveryCents+s.inspectionCents+s.facilityCents <= 0 || !money(s.corralCents+s.deliveryCents+s.inspectionCents+s.facilityCents)) throw fail(503, 'An approved fee schedule is required.');
-  return Object.fromEntries(['version','basis','currency','corralCents','deliveryCents','inspectionCents','facilityCents','syntheticOnly'].filter(key => s[key] !== undefined).map(key => [key,s[key]]));
+  if(production&&(s.syntheticOnly!==false||!text(s.approvalReference,200)))throw fail(503,'Approved production fee provenance is required; synthetic rates are not accepted.');
+  return Object.fromEntries(['version','basis','currency','corralCents','deliveryCents','inspectionCents','facilityCents','syntheticOnly','approvalReference'].filter(key => s[key] !== undefined).map(key => [key,s[key]]));
 }
 
 /** One invoice per approved animal revision; amounts are server-calculated integer centavos. */
-export function createOperationsStore(getDb) {
+export function createOperationsStore(getDb, { production = false } = {}) {
   const tracking=createTrackingStore(getDb,validInvoice);
   const db = () => { const value = getDb(); if (!value) throw fail(503, 'Workflow storage is unavailable.'); return value; };
   const invoice = value => db().doc(`invoices/${value}`);
@@ -50,12 +59,19 @@ export function createOperationsStore(getDb) {
   return {
     trackingRead:(value,p,at)=>tracking.read(value,p,at),
     trackingPublish:(value,b,p,at)=>tracking.publish(value,b,p,at),
-    async schedule(scope) { const s = await db().doc(`operation_fee_schedules/${scope}`).get(); return scheduleView(s.exists?s.data():null); },
+    async schedule(scope) { const s = await db().doc(`operation_fee_schedules/${scope}`).get(); return scheduleView(s.exists?s.data():null,production); },
     async list(p, after) {
       let q = db().collection('invoices').where('municipalScopeId','==',p.municipalScopeId).where('workflow','==','animal');
       if (p.role === 'vendor') q = q.where('vendor_id','==',p.vendorBusinessId);
+      if (deliveryOnly(p)) q = q.where('delivery.assigneeUid','==',p.uid);
       q = q.orderBy(FieldPath.documentId()); if (after) q=q.startAfter(after);
       const rows=await q.limit(26).get(); return rows.docs.map(s=>{const row=s.data();if(row.id!==undefined&&row.id!==s.id)throw fail(503,'Invoice identity requires review.');return {...row,id:s.id};});
+    },
+    async deliveries(p,after) {
+      let q=db().collection('invoices').where('municipalScopeId','==',p.municipalScopeId).where('workflow','==','animal');
+      q=p.role==='admin'?q.where('delivery.status','in',['assigned','in_transit','delivered']):q.where('delivery.assigneeUid','==',p.uid);
+      q=q.orderBy(FieldPath.documentId());if(after)q=q.startAfter(after);
+      const rows=await q.limit(26).get();return rows.docs.map(s=>{const row=s.data();if(row.id!==undefined&&row.id!==s.id)throw fail(503,'Delivery identity requires review.');return {...row,id:s.id};});
     },
     async get(value) { const s=await invoice(value).get(); if(!s.exists)return null; if(s.data().id!==undefined&&s.data().id!==s.id)throw fail(503,'Invoice identity requires review.');return {...s.data(),id:s.id}; },
     async bill(animalId, b, p, at) {
@@ -69,10 +85,10 @@ export function createOperationsStore(getDb) {
         const vendor=await read(tx,db().doc(`vendors/${a.vendorBusinessId}`));
         if(!vendor||vendor.status!=='Active'||vendor.municipalScopeId!==p.municipalScopeId||!text(vendor.name,200))throw fail(409,'Vendor ownership requires municipal review.');
         const feeSnap=await tx.get(db().doc(`operation_fee_schedules/${p.municipalScopeId}`));
-        const fees=scheduleView(feeSnap.exists?feeSnap.data():null);
+        const fees=scheduleView(feeSnap.exists?feeSnap.data():null,production);
         if(fees.version!==b.feeScheduleVersion)throw fail(409,'The fee schedule changed. Refresh before issuing an invoice.');
         const totalCents=fees.corralCents+fees.deliveryCents+fees.inspectionCents+fees.facilityCents;
-        const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:municipalDate(at),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
+        const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:municipalDate(at),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,feeScheduleSnapshot:fees,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
         tx.create(invoice(invoiceId),row);
         tx.update(db().doc(`animal_records/${animalId}`),{billingInvoiceId:invoiceId,updatedAt:at,updatedBy:p.uid});
         audited(tx,p,row,'invoice_issued',at); return row;
@@ -135,7 +151,7 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     if(!canBill&&!canDeliver&&p.role!=='vendor')throw fail(403,'Billing or delivery permission is required.');
     let feeSchedule=null,feeMessage=null;
     if(enabled&&canBill&&(!production||production.features.billing))try{feeSchedule=await store.schedule(p.municipalScopeId);}catch(e){if(e.status!==503)throw e;feeMessage='An approved fee schedule is required.';}
-    res.json({enabled,canBill:enabled&&canBill&&(!production||production.features.billing),canDeliver:enabled&&canDeliver&&(!production||production.features.delivery),canRecordPayment:enabled&&canBill&&(!production||production.features.payment),canPublishTracking:enabled&&canDeliver&&p.role==='staff'&&(!production||production.features.tracking),feeSchedule,feeMessage});
+    res.json({enabled,workspaceContract:'billing_delivery_v1',canReadBilling:enabled&&canBill,canReadDelivery:enabled&&canDeliver,canReadEligible:enabled&&canBill,canReadTracking:enabled&&(p.role==='admin'||p.role==='vendor'||canDeliver),canBill:enabled&&canBill&&(!production||production.features.billing),canDeliver:enabled&&canDeliver&&(!production||production.features.delivery),canRecordPayment:enabled&&canBill&&(!production||production.features.payment),canPublishTracking:enabled&&canDeliver&&p.role==='staff'&&(!production||production.features.tracking),feeSchedule,feeMessage});
   }));
   router.use((req,res,next)=>req.operationsEnabled?next():res.status(503).json({message:'Billing, payment and delivery workflows are awaiting pilot activation.'}));
   const writeGate=feature=>(req,res,next)=>production&&production.features[feature]!==true
@@ -176,15 +192,42 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     const page=rows.slice(0,25);const items=page.filter(a=>a.inspection?.status==='approved'&&a.inspection.revision===a.revision&&!a.billingInvoiceId&&!a.deliveryId).map(a=>({id:a.id,vendorBusinessId:a.vendorBusinessId,municipalScopeId:a.municipalScopeId,identifier:a.identifier,species:a.species,weightGrams:a.weightGrams,revision:a.revision}));
     res.json({items,nextCursor:rows.length>25?encode(p,page.at(-1).id,'eligible'):null});
   }));
+  router.get('/billing/invoices',run(async(req,res)=>{
+    if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');
+    const rows=await store.list(req.principal,query(req,'billing-invoices'));
+    if(!Array.isArray(rows)||rows.length>26||rows.some(row=>!scopeRead(row,req.principal)||!validInvoice(row)))throw fail(503,'Invoices require municipal review.');
+    const page=rows.slice(0,25);res.json({items:page.map(operationBillingView),nextCursor:rows.length>25?encode(req.principal,page.at(-1).id,'billing-invoices'):null});
+  }));
+  router.get('/billing/invoices/:id',run(async(req,res)=>{
+    if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');if(Object.keys(req.query).length)throw fail(400,'Unsupported workflow filter.');
+    const row=await store.get(req.params.id);if(!scopeRead(row,req.principal))throw fail(404,'Invoice not found.');if(!validInvoice(row))throw fail(503,'Invoice requires municipal review.');res.json(operationBillingView(row));
+  }));
+  const deliveryRow=async(req)=>{const row=await store.get(req.params.id);if(!deliveryReadable(row,req.principal))throw fail(404,'Delivery assignment not found.');if(!validInvoice(row))throw fail(503,'Delivery invoice requires municipal review.');return row;};
+  const deliveryPermission=p=>permission(p,'delivery');
+  const deliveryView=async row=>deliveryAssignmentView(row,await animalStore.get(row.animalId));
+  router.get('/deliveries',run(async(req,res)=>{
+    if(!deliveryPermission(req.principal))throw fail(403,'Delivery permission is required.');
+    const after=query(req,'deliveries'),rows=await store.deliveries(req.principal,after);
+    if(!Array.isArray(rows)||rows.length>26||rows.some(row=>!deliveryReadable(row,req.principal)||!validInvoice(row)))throw fail(503,'Delivery assignments require municipal review.');
+    for(let i=0;i<rows.length;i++){const previous=i?rows[i-1].id:after;if(previous&&Buffer.compare(Buffer.from(previous),Buffer.from(rows[i].id))>=0)throw fail(503,'Delivery ordering requires review.');}
+    const page=rows.slice(0,25);res.json({items:await Promise.all(page.map(deliveryView)),nextCursor:rows.length>25?encode(req.principal,page.at(-1).id,'deliveries'):null});
+  }));
+  router.get('/deliveries/:id',run(async(req,res)=>{if(!deliveryPermission(req.principal))throw fail(403,'Delivery permission is required.');if(Object.keys(req.query).length)throw fail(400,'Unsupported delivery filter.');res.json(await deliveryView(await deliveryRow(req)));}));
+  router.post('/deliveries/:id/status',writeGate('delivery'),run(async(req,res)=>{
+    if(!deliveryPermission(req.principal))throw fail(403,'Delivery permission is required.');
+    const b=body(req,['expectedRevision','status','notes']);if(!['in_transit','delivered'].includes(b.status)||!text(b.notes,500))throw fail(400,'Enter delivery status and confirmation notes.');
+    const before=await deliveryRow(req),animal=await animalStore.get(before.animalId);deliveryAssignmentView(before,animal);
+    res.json(deliveryAssignmentView(await store.mutate(req.params.id,b,req.principal,'delivery_status',now()),animal));
+  }));
   router.get('/invoices',run(async(req,res)=>{
     if(!canRead(req.principal))throw fail(403,'Billing or delivery permission is required.');
     const rows=await store.list(req.principal,query(req,'invoices'));
-    if(!Array.isArray(rows)||rows.length>26||rows.some(row=>!scopeRead(row,req.principal)||!validInvoice(row)))throw fail(503,'Invoices require municipal review.');
+    if(!Array.isArray(rows)||rows.length>26||rows.some(row=>!scopeRead(row,req.principal)||(deliveryOnly(req.principal)&&row.delivery?.assigneeUid!==req.principal.uid)||!validInvoice(row)))throw fail(503,'Invoices require municipal review.');
     const page=rows.slice(0,25);res.json({items:page.map(operationInvoiceView),nextCursor:rows.length>25?encode(req.principal,page.at(-1).id,'invoices'):null});
   }));
   router.get('/invoices/:id',run(async(req,res)=>{
     if(Object.keys(req.query).length)throw fail(400,'Unsupported workflow filter.');if(!canRead(req.principal))throw fail(403,'Billing or delivery permission is required.');
-    const row=await store.get(req.params.id);if(!scopeRead(row,req.principal))throw fail(404,'Invoice not found.');if(!validInvoice(row))throw fail(503,'Invoice requires municipal review.');res.json(operationInvoiceView(row));
+    const row=await store.get(req.params.id);if(!scopeRead(row,req.principal)||(deliveryOnly(req.principal)&&row.delivery?.assigneeUid!==req.principal.uid))throw fail(404,'Invoice not found.');if(!validInvoice(row))throw fail(503,'Invoice requires municipal review.');res.json(operationInvoiceView(row));
   }));
   router.post('/animals/:id/invoice',writeGate('billing'),run(async(req,res)=>{
     if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');
