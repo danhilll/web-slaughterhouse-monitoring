@@ -56,6 +56,22 @@ export function createOperationsStore(getDb, { production = false } = {}) {
   const invoice = value => db().doc(`invoices/${value}`);
   const read = async (tx, ref) => { const snap = await tx.get(ref); if (!snap.exists) return null; const row = snap.data(); if (row.id !== undefined && row.id !== snap.id) throw fail(503,'Record identity requires review.'); return {...row,id:snap.id}; };
   const audited = (tx, p, row, action, at) => tx.create(db().collection('operation_audit').doc(), {invoiceId:row.id,animalId:row.animalId,municipalScopeId:p.municipalScopeId,actorUid:p.uid,action,at,after:operationInvoiceView(row)});
+  const invoiceIdFor = (scope,animalId) => `AINV-${hash(JSON.stringify([scope,animalId])).slice(0,40)}`;
+  // The same read set validates a preview and is re-read atomically at issuance.
+  const invoiceInputs = async (tx,animalId,p) => {
+    const invoiceId=invoiceIdFor(p.municipalScopeId,animalId);
+    const a=await read(tx,db().doc(`animal_records/${animalId}`));
+    if(!a||a.municipalScopeId!==p.municipalScopeId)throw fail(404,'Animal record not found.');
+    if(!Number.isSafeInteger(a.revision)||a.revision<1||!text(a.identifier,80)||a.inspection?.status!=='approved'||a.inspection.revision!==a.revision||!id(a.vendorBusinessId)||!['Cow','Pig'].includes(a.species)||!Number.isSafeInteger(a.weightGrams)||a.weightGrams<=0)throw fail(409,'Refresh and review the approved animal revision.');
+    const existing=await read(tx,invoice(invoiceId));
+    if(existing||a.billingInvoiceId||a.deliveryId)throw fail(409,'This animal already has an invoice. Refresh invoice history.');
+    const vendor=await read(tx,db().doc(`vendors/${a.vendorBusinessId}`));
+    if(!vendor||vendor.status!=='Active'||vendor.municipalScopeId!==p.municipalScopeId||!text(vendor.name,200))throw fail(409,'Vendor ownership requires municipal review.');
+    const feeSnap=await tx.get(db().doc(`operation_fee_schedules/${p.municipalScopeId}`));
+    const fees=scheduleView(feeSnap.exists?feeSnap.data():null,production);
+    const totalCents=fees.corralCents+fees.deliveryCents+fees.inspectionCents+fees.facilityCents;
+    return {a,vendor,fees,totalCents,invoiceId};
+  };
   return {
     trackingRead:(value,p,at)=>tracking.read(value,p,at),
     trackingPublish:(value,b,p,at)=>tracking.publish(value,b,p,at),
@@ -74,20 +90,17 @@ export function createOperationsStore(getDb, { production = false } = {}) {
       const rows=await q.limit(26).get();return rows.docs.map(s=>{const row=s.data();if(row.id!==undefined&&row.id!==s.id)throw fail(503,'Delivery identity requires review.');return {...row,id:s.id};});
     },
     async get(value) { const s=await invoice(value).get(); if(!s.exists)return null; if(s.data().id!==undefined&&s.data().id!==s.id)throw fail(503,'Invoice identity requires review.');return {...s.data(),id:s.id}; },
-    async bill(animalId, b, p, at) {
-      const invoiceId=`AINV-${hash(JSON.stringify([p.municipalScopeId,animalId])).slice(0,40)}`;
+    async preview(animalId,p) {
       return db().runTransaction(async tx=>{
-        const a=await read(tx,db().doc(`animal_records/${animalId}`));
-        if(!a||a.municipalScopeId!==p.municipalScopeId)throw fail(404,'Animal record not found.');
-        if(a.revision!==b.expectedRevision||a.inspection?.status!=='approved'||a.inspection.revision!==a.revision||!id(a.vendorBusinessId)||!['Cow','Pig'].includes(a.species)||!Number.isSafeInteger(a.weightGrams)||a.weightGrams<=0)throw fail(409,'Refresh and review the approved animal revision.');
-        const existing=await read(tx,invoice(invoiceId));
-        if(existing||a.billingInvoiceId||a.deliveryId)throw fail(409,'This animal already has an invoice. Refresh invoice history.');
-        const vendor=await read(tx,db().doc(`vendors/${a.vendorBusinessId}`));
-        if(!vendor||vendor.status!=='Active'||vendor.municipalScopeId!==p.municipalScopeId||!text(vendor.name,200))throw fail(409,'Vendor ownership requires municipal review.');
-        const feeSnap=await tx.get(db().doc(`operation_fee_schedules/${p.municipalScopeId}`));
-        const fees=scheduleView(feeSnap.exists?feeSnap.data():null,production);
+        const {a,vendor,fees,totalCents}=await invoiceInputs(tx,animalId,p);
+        return {projection:'invoice_preview_v1',animal:{id:a.id,identifier:a.identifier,species:a.species,weightGrams:a.weightGrams,revision:a.revision,vendorBusinessId:a.vendorBusinessId,municipalScopeId:a.municipalScopeId},vendor:{id:vendor.id,name:vendor.name.trim()},feeSchedule:fees,totalCents,currency:'PHP'};
+      });
+    },
+    async bill(animalId, b, p, at) {
+      return db().runTransaction(async tx=>{
+        const {a,vendor,fees,totalCents,invoiceId}=await invoiceInputs(tx,animalId,p);
+        if(a.revision!==b.expectedRevision)throw fail(409,'Refresh and review the approved animal revision.');
         if(fees.version!==b.feeScheduleVersion)throw fail(409,'The fee schedule changed. Refresh before issuing an invoice.');
-        const totalCents=fees.corralCents+fees.deliveryCents+fees.inspectionCents+fees.facilityCents;
         const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:municipalDate(at),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,feeScheduleSnapshot:fees,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
         tx.create(invoice(invoiceId),row);
         tx.update(db().doc(`animal_records/${animalId}`),{billingInvoiceId:invoiceId,updatedAt:at,updatedBy:p.uid});
@@ -228,6 +241,11 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
   router.get('/invoices/:id',run(async(req,res)=>{
     if(Object.keys(req.query).length)throw fail(400,'Unsupported workflow filter.');if(!canRead(req.principal))throw fail(403,'Billing or delivery permission is required.');
     const row=await store.get(req.params.id);if(!scopeRead(row,req.principal)||(deliveryOnly(req.principal)&&row.delivery?.assigneeUid!==req.principal.uid))throw fail(404,'Invoice not found.');if(!validInvoice(row))throw fail(503,'Invoice requires municipal review.');res.json(operationInvoiceView(row));
+  }));
+  router.get('/animals/:id/invoice-preview',run(async(req,res)=>{
+    if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');
+    if(Object.keys(req.query).length)throw fail(400,'Unsupported invoice preview filter.');
+    res.json(await store.preview(req.params.id,req.principal));
   }));
   router.post('/animals/:id/invoice',writeGate('billing'),run(async(req,res)=>{
     if(!permission(req.principal,'billing'))throw fail(403,'Billing permission is required.');

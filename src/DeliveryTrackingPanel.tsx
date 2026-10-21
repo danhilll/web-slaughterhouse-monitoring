@@ -25,9 +25,9 @@ export function DeliveryTrackingPanel({ invoiceId, onClose }: { invoiceId: strin
     <p role="status" className="mt-3 font-medium">{trackingLabel(current, error, age)}</p>
     {position && <>
       <button className="btn-secondary mt-3" onClick={() => setShowMap(!showMap)}>{showMap ? 'Hide map' : 'Show map'}</button>
-      <p className="mt-1 text-xs">Opening the map requests this area from OpenStreetMap. Account and invoice details are not sent.</p>
+      <p className="mt-1 text-xs">This is not the destination or this device’s current position. Opening the map requests this area from OpenStreetMap. Account and invoice details are not sent.</p>
       {showMap && visible && <DeliveryMap position={position} />}
-      <p className="mt-2">Last reported position: {position.latitude}, {position.longitude}</p>
+      <p className="mt-2">Last shared delivery position: {position.latitude}, {position.longitude}</p>
       <p className="text-sm">Accuracy ±{Math.round(position.accuracyMeters)} m{position.accuracyMeters > 100 ? ' — approximate position' : ''}</p>
       <p className="text-sm">Captured {age} seconds ago · {new Date(position.capturedAt).toLocaleString()}</p>
     </>}

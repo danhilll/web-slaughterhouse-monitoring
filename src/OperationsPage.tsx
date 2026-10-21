@@ -1,25 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from './api';
-import { validateBillingAmounts, validateWorkspaceSettings } from './operationsWorkspace';
+import { validateBillingAmounts, validateWorkspaceSettings, validateInvoicePreview, type InvoicePreview } from './operationsWorkspace';
 import { DeliveryTrackingPanel } from './DeliveryTrackingPanel';
 
 type Mode='billing'|'delivery';
 type Settings={enabled:boolean;workspaceContract?:string;canReadBilling:boolean;canReadDelivery:boolean;canReadEligible:boolean;canReadTracking:boolean;canBill:boolean;canDeliver:boolean;canRecordPayment:boolean;canPublishTracking:boolean;feeSchedule:null|{version:number;corralCents:number;deliveryCents:number;inspectionCents:number;facilityCents:number;syntheticOnly?:boolean};feeMessage?:string|null};
 type Invoice={id:string;vendor_id:string;vendor_name:string;animalIdentifier:string;animalRevision:number;revision:number;date_issued:string;due_date:string;totalCents:number;paidCents:number;balanceCents:number;payment_status:string;syntheticOnly:boolean};
-type Eligible={id:string;vendorBusinessId:string;identifier:string;species:string;weightGrams:number;revision:number};
+type Eligible={municipalScopeId:string;id:string;vendorBusinessId:string;identifier:string;species:string;weightGrams:number;revision:number};
 type Delivery={id:string;projection:'delivery_assignment_v1';vendorBusinessId:string;vendorName:string;animalIdentifier:string;animalRevision:number;revision:number;syntheticOnly:boolean;delivery:{destination:string;status:string;assignedAt:string;notes?:string};meatDetails:null|{species:string;weightGrams:number;weighedAt:string;carcassWeight:null|{weightGrams:number;weighedAt:string};carcassEstimate:{weightGrams:number};carcassWeightSelection:{source:string;weightGrams:number;requiresReview:boolean}};meatDetailsMessage:string|null};
 const currency=(c:number)=>new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP'}).format(c/100);
 export function OperationsPage({workspace}:{workspace?:Mode}) {
  const [mode,setMode]=useState<Mode>(workspace??'billing'),[settings,setSettings]=useState<Settings|null>(null);
  const [invoices,setInvoices]=useState<Invoice[]>([]),[deliveries,setDeliveries]=useState<Delivery[]>([]),[eligible,setEligible]=useState<Eligible[]>([]);
  const [cursor,setCursor]=useState<string|null>(null),[eligibleCursor,setEligibleCursor]=useState<string|null>(null),[trackingId,setTrackingId]=useState<string|null>(null);
+ const [preview,setPreview]=useState<InvoicePreview|null>(null),[previewBusy,setPreviewBusy]=useState(false);
  const [mutationReviewRequired,setMutationReviewRequired]=useState(false);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[dueDate,setDueDate]=useState(''),[creating,setCreating]=useState(false);
  const epoch=useRef(0),controller=useRef<AbortController|null>(null),mounted=useRef(true);
  const json=async(url:string,signal?:AbortSignal)=>{const r=await apiFetch(url,{signal});const b=await r.json();if(!r.ok)throw Error(b.message||'Workspace unavailable.');return b;};
  const load=async(after?:string,eligibleAfter?:string)=>{
-  controller.current?.abort();const abort=new AbortController();controller.current=abort;const current=++epoch.current;setBusy(true);setError('');setSettings(null);
+  controller.current?.abort();const abort=new AbortController();controller.current=abort;const current=++epoch.current;setBusy(true);setError('');setSettings(null);setPreview(null);setTrackingId(null);
   try{const s:Settings=await json('/api/operations/settings',abort.signal);if(current!==epoch.current)return;validateWorkspaceSettings(s);setSettings(s);
    if(mode==='billing'){
     if(s.canReadBilling!==true)throw Error('Billing permission is required.');
@@ -32,11 +33,17 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
  useEffect(()=>{setTrackingId(null);setInvoices([]);setDeliveries([]);setEligible([]);setCursor(null);setEligibleCursor(null);setDueDate('');void load();return()=>{epoch.current++;controller.current?.abort();};},[mode]);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  useEffect(()=>{if(workspace)setMode(workspace);},[workspace]);
+ const previewInvoice=async(animal:Eligible)=>{
+  if(previewBusy||creating)return;const current=epoch.current;setPreview(null);setPreviewBusy(true);setError('');
+  try{const value=await json('/api/operations/animals/'+encodeURIComponent(animal.id)+'/invoice-preview');validateInvoicePreview(value,animal);if(mounted.current&&current===epoch.current)setPreview(value);}
+  catch(e){if(mounted.current&&current===epoch.current)setError((e as Error).message);}
+  finally{if(mounted.current)setPreviewBusy(false);}
+ };
  const createInvoice=async(animal:Eligible)=>{
-  if(creating||mutationReviewRequired||!settings?.canBill||!settings.feeSchedule||!dueDate)return;
+  if(creating||mutationReviewRequired||!settings?.canBill||!preview||preview.animal.id!==animal.id||!dueDate)return;
   const current=epoch.current;setCreating(true);setError('');
-  try{const r=await apiFetch('/api/operations/animals/'+encodeURIComponent(animal.id)+'/invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedRevision:animal.revision,feeScheduleVersion:settings.feeSchedule.version,dueDate})});const b=await r.json();if(!r.ok)throw Error(b.message||'Invoice result requires review; refresh before any new submission.');if(mounted.current&&current===epoch.current)await load();}
-  catch(e){if(mounted.current&&current===epoch.current){setMutationReviewRequired(true);setError((e as Error).message+' No automatic retry was made. Refresh and review before submitting again.');}}
+  try{const r=await apiFetch('/api/operations/animals/'+encodeURIComponent(animal.id)+'/invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedRevision:animal.revision,feeScheduleVersion:preview.feeSchedule.version,dueDate})});const b=await r.json();if(!r.ok)throw Error(b.message||'Invoice result requires review; refresh before any new submission.');if(mounted.current&&current===epoch.current)await load();}
+  catch(e){if(mounted.current&&current===epoch.current){setPreview(null);setMutationReviewRequired(true);setError((e as Error).message+' No automatic retry was made. Refresh and review before submitting again.');}}
   finally{if(mounted.current)setCreating(false);}
  };
  return <div className="space-y-5">
@@ -55,14 +62,15 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
     {settings?.feeSchedule?<p className="mt-2">{settings.feeSchedule.syntheticOnly?'Synthetic rehearsal fees':'Approved fee schedule'} · Version {settings.feeSchedule.version} · {currency(settings.feeSchedule.corralCents+settings.feeSchedule.deliveryCents+settings.feeSchedule.inspectionCents+settings.feeSchedule.facilityCents)}</p>:<p className="mt-2">{settings?.feeMessage||'No approved fees are available for issuance; no amount has been substituted.'}</p>}
     {settings?.canBill&&settings.feeSchedule&&<label className="my-3 block">Invoice due date (required; no credit term assumed)<input aria-label="Invoice due date" type="date" value={dueDate} disabled={creating} onChange={e=>setDueDate(e.target.value)}/></label>}
     {!eligible.length&&<p className="mt-2">No eligible animals on this page.</p>}
-    {eligible.map(a=><article className="my-3 border-t pt-3" key={a.id}><h4 className="font-semibold">{a.identifier} · {a.species}</h4><p>Owning business {a.vendorBusinessId} · measured live weight {a.weightGrams/1000} kg · revision {a.revision}</p>{settings?.canBill&&settings.feeSchedule&&<button className="btn-secondary mt-2" disabled={creating||mutationReviewRequired||!dueDate} onClick={()=>void createInvoice(a)}>Issue invoice for {a.identifier}</button>}</article>)}
+    {eligible.map(a=><article className="my-3 border-t pt-3" key={a.id}><h4 className="font-semibold">{a.identifier} · {a.species}</h4><p>Owning business {a.vendorBusinessId} · measured live weight {a.weightGrams/1000} kg · revision {a.revision}</p><button className="btn-secondary mt-2" disabled={creating||previewBusy||mutationReviewRequired} onClick={()=>void previewInvoice(a)}>Preview invoice for {a.identifier}</button>
+    {preview?.animal.id===a.id&&<section aria-label="Validated invoice preview" className="my-3 rounded border p-4"><h5 className="font-bold">Validated invoice preview</h5><p>Owning vendor: {preview.vendor.name} · {preview.vendor.id}</p><p>{preview.feeSchedule.syntheticOnly?'Synthetic rehearsal fees':'Approved fee schedule'} · Version {preview.feeSchedule.version}</p><ul><li>Corral: {currency(preview.feeSchedule.corralCents)}</li><li>Delivery: {currency(preview.feeSchedule.deliveryCents)}</li><li>Inspection: {currency(preview.feeSchedule.inspectionCents)}</li><li>Facility: {currency(preview.feeSchedule.facilityCents)}</li></ul><p>Total: {currency(preview.totalCents)}</p><p>Animal {preview.animal.identifier} · revision {preview.animal.revision}. Issuance rechecks ownership, approval and fees.</p>{settings?.canBill&&<button className="btn-secondary mt-2" disabled={creating||mutationReviewRequired||!dueDate} onClick={()=>void createInvoice(a)}>Confirm and issue invoice for {a.identifier}</button>}</section>}</article>)}
     {eligibleCursor&&<button className="btn-secondary" onClick={()=>void load(undefined,eligibleCursor)}>Load more eligible animals</button>}
    </section>
    <h3 className="font-bold">Vendor-linked invoices</h3>{!invoices.length&&<p>No animal invoices on this page. Animal records are not invoice history.</p>}
    {invoices.map(i=><article className="rounded-xl border p-5" key={i.id}><h4 className="font-bold">{i.id}</h4>{i.syntheticOnly&&<p>Synthetic rehearsal invoice</p>}<p>{i.vendor_name} · owning business {i.vendor_id}</p><p>Animal {i.animalIdentifier} · invoiced revision {i.animalRevision}</p><p>Total {currency(i.totalCents)} · recorded paid {currency(i.paidCents)} · balance {currency(i.balanceCents)}</p><p>{i.payment_status} · issued {i.date_issued} · due {i.due_date}</p><p className="text-sm">Recorded staff payment confirmation, not online payment processing or an official receipt.</p></article>)}
   </>}
   {!busy&&!error&&mode==='delivery'&&<><h3 className="font-bold">Authorized delivery assignments</h3>{!deliveries.length&&<p>No authorized assignments on this page. Animal records do not create an assignment.</p>}
-   {deliveries.map(d=><article className="rounded-xl border p-5" key={d.id}><h4 className="font-bold">{d.vendorName} · {d.animalIdentifier}</h4>{d.syntheticOnly&&<p>Synthetic rehearsal assignment</p>}<p>Owning business {d.vendorBusinessId} · invoiced animal revision {d.animalRevision}</p><p>Destination: {d.delivery.destination}</p><p>Status: {d.delivery.status.replace(/_/g,' ')} · assigned {d.delivery.assignedAt}</p>{d.delivery.notes&&<p>Delivery confirmation: {d.delivery.notes}</p>}
+   {deliveries.map(d=><article className="rounded-xl border p-5" key={d.id}><h4 className="font-bold">{d.vendorName} · {d.animalIdentifier}</h4>{d.syntheticOnly&&<p>Synthetic rehearsal assignment</p>}<p>Owning business {d.vendorBusinessId} · invoiced animal revision {d.animalRevision}</p><p>Destination: {d.delivery.destination}</p><p className="text-sm">No recorded destination coordinates. The map shows only the last shared delivery position, not the destination or this device’s current position.</p><p>Status: {d.delivery.status.replace(/_/g,' ')} · assigned {d.delivery.assignedAt}</p>{d.delivery.notes&&<p>Delivery confirmation: {d.delivery.notes}</p>}
     {d.meatDetails?<div className="my-3"><p>{d.meatDetails.species} · measured live weight {d.meatDetails.weightGrams/1000} kg · weighed {d.meatDetails.weighedAt}</p><p>Estimated carcass weight {d.meatDetails.carcassEstimate.weightGrams/1000} kg (80% rule, not measured)</p>{d.meatDetails.carcassWeight?<p>Actual measured carcass {d.meatDetails.carcassWeight.weightGrams/1000} kg · weighed {d.meatDetails.carcassWeight.weighedAt}</p>:<p>No actual carcass measurement recorded.</p>}{d.meatDetails.carcassWeightSelection.requiresReview&&<p role="alert">Historical carcass measurement requires revision review before use.</p>}</div>:<p className="my-3">{d.meatDetailsMessage}</p>}
     {settings?.canReadTracking&&(trackingId===d.id?<DeliveryTrackingPanel invoiceId={d.id} onClose={()=>setTrackingId(null)}/>:<button className="btn-secondary" onClick={()=>setTrackingId(d.id)}>View authorized last reported location</button>)}
    </article>)}

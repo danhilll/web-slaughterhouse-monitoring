@@ -295,3 +295,40 @@ test('production invoice issuance rejects synthetic/unproven fees and stores imm
 });
 
 test('new Billing projection never copies legacy delivery coordinates into its workspace response',()=>{const row={totalCents:9500,payment_status:'Unpaid',delivery:{assigneeUid:'D',destination:'Recorded',status:'assigned',location:{latitude:1,longitude:2,accuracyMeters:3,capturedAt:'2026-10-21T01:00:00Z'}}};const view=operationBillingView(row);assert.equal(view.balanceCents,9500);assert.ok(!('location' in view.delivery));assert.ok(row.delivery.location);});
+
+test('invoice preview resolves active owning vendor and exact itemized fees without writes; issue rechecks and vendors isolate',async t=>{
+ const f=await fixture(t),before=structuredClone([...f.rows]);
+ const p=await f.call('/animals/ANM-A/invoice-preview');assert.equal(p.status,200);assert.equal(p.body.projection,'invoice_preview_v1');assert.deepEqual(p.body.vendor,{id:'VEN-A',name:'Synthetic A'});assert.equal(p.body.animal.vendorBusinessId,p.body.vendor.id);assert.equal(p.body.animal.municipalScopeId,'SCOPE');assert.equal(p.body.totalCents,9500);assert.deepEqual(p.body.feeSchedule,((({status,...rest})=>rest)(fees)));assert.deepEqual([...f.rows],before);
+ for(const role of ['delivery','inventory','inspector','alice','bob'])assert.equal((await f.call('/animals/ANM-A/invoice-preview',role)).status,403);
+ assert.equal((await f.call('/animals/ANM-A/invoice-preview','other')).status,404);assert.equal((await f.call('/animals/ANM-A/invoice-preview?fee=1')).status,400);
+ const issued=await f.call('/animals/ANM-A/invoice','billing',{...bill,expectedRevision:p.body.animal.revision,feeScheduleVersion:p.body.feeSchedule.version});assert.equal(issued.status,201);assert.equal(issued.body.vendor_id,p.body.vendor.id);
+ assert.equal((await f.call('/animals/ANM-A/invoice-preview')).status,409);assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,409);
+ assert.equal((await f.call('/invoices/'+issued.body.id,'alice')).status,200);assert.equal((await f.call('/invoices/'+issued.body.id,'bob')).status,404);
+ const balance=await f.call('/billing/invoices/'+issued.body.id);assert.equal(balance.body.balanceCents,9500);assert.equal(balance.body.paidCents,0);
+ const audits=[...f.rows].filter(([k])=>k.startsWith('operation_audit/'));assert.equal(audits.length,1);assert.equal(audits[0][1].action,'invoice_issued');assert.equal(audits[0][1].after.vendor_id,'VEN-A');
+});
+test('preview cannot authorize stale ownership, approval, fees or duplicates; no synthetic production substitution',async t=>{
+ const f=await fixture(t);assert.equal((await f.call('/animals/ANM-A/invoice-preview')).status,200);
+ f.rows.get('vendors/VEN-A').municipalScopeId='OTHER';assert.equal((await f.call('/animals/ANM-A/invoice-preview')).status,409);assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,409);f.rows.get('vendors/VEN-A').municipalScopeId='SCOPE';
+ f.rows.get('animal_records/ANM-A').inspection.revision=2;assert.equal((await f.call('/animals/ANM-A/invoice-preview')).status,409);f.rows.get('animal_records/ANM-A').inspection.revision=1;
+ f.rows.get('operation_fee_schedules/SCOPE').version=2;assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,409);
+ assert.equal([...f.rows.keys()].filter(k=>k.startsWith('invoices/')||k.startsWith('operation_audit/')).length,0);
+ const production={municipalScopeId:'SCOPE',features:{billing:false,payment:false,delivery:false,tracking:false}};const prod=await fixture(t,true,undefined,production);
+ assert.equal((await prod.call('/animals/ANM-A/invoice-preview')).status,503);
+ prod.rows.set('operation_fee_schedules/SCOPE',{...fees,syntheticOnly:false,approvalReference:'TEST approval only'});
+ assert.equal((await prod.call('/animals/ANM-A/invoice-preview')).status,200);assert.equal((await prod.call('/animals/ANM-A/invoice','billing',bill)).status,503);assert.equal([...prod.rows.keys()].filter(k=>k.startsWith('invoices/')).length,0);
+});
+test('isolated connected preview→invoice→Vendor balance→assigned delivery→authorized MAPCN position contract',async t=>{
+ const f=await fixture(t);f.rows.get('animal_records/ANM-A').weighedAt='2026-10-21T01:00:00Z';
+ const preview=await f.call('/animals/ANM-A/invoice-preview');assert.equal(preview.status,200);
+ const issued=await f.call('/animals/ANM-A/invoice','billing',{...bill,expectedRevision:preview.body.animal.revision,feeScheduleVersion:preview.body.feeSchedule.version});assert.equal(issued.status,201);const path='/invoices/'+issued.body.id;
+ assert.equal((await f.call(path,'alice')).body.payment_status,'Unpaid');assert.equal((await f.call(path,'bob')).status,404);
+ assert.equal((await f.call(path+'/delivery','delivery',{expectedRevision:1,assigneeUid:'delivery',destination:'Synthetic recorded destination'})).status,409);
+ assert.equal((await f.call(path+'/payment','billing',payment(1))).status,200);const balance=(await f.call('/billing/invoices/'+issued.body.id)).body;assert.equal(balance.balanceCents,0);assert.equal(balance.paidCents,9500);
+ assert.equal((await f.call(path+'/delivery','delivery',{expectedRevision:2,assigneeUid:'delivery',destination:'Synthetic recorded destination'})).status,200);
+ const assignment=await f.call('/deliveries/'+issued.body.id,'delivery');assert.equal(assignment.status,200);assert.equal(assignment.body.delivery.destination,'Synthetic recorded destination');assert.equal(assignment.body.delivery.location,undefined);assert.equal(assignment.body.meatDetails.carcassWeight,null);assert.equal(assignment.body.meatDetails.carcassWeightSelection.source,'estimated');assert.equal((await f.call('/deliveries/'+issued.body.id,'delivery2')).status,404);
+ assert.equal((await f.call(path+'/tracking','delivery')).body.location,null);
+ assert.equal((await f.call('/deliveries/'+issued.body.id+'/status','delivery',{expectedRevision:3,status:'in_transit',notes:'Synthetic departure'})).status,200);
+ const location={latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:new Date().toISOString()};assert.equal((await f.call(path+'/tracking','delivery',location)).status,200);assert.equal((await f.call(path+'/tracking','alice')).body.location.latitude,13.96);assert.equal((await f.call(path+'/tracking','bob')).status,404);assert.equal((await f.call(path+'/tracking','delivery2')).status,404);
+ assert.equal(f.rows.get('invoices/'+issued.body.id).revision,4);assert.equal([...f.rows.keys()].filter(k=>k.startsWith('operation_audit/')).length,4);
+});
