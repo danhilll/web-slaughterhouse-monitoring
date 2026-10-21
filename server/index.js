@@ -943,6 +943,8 @@ app.get('/api/invoices/:id', asyncHandler(async (req, res) => {
 //   never auto-marks Overdue; treasurer flips Unpaid -> Paid/Overdue.
 // - Unpaid invoices raise 'warning' notifications, Overdue raise 'alert'.
 // - Dashboard 'unpaid' count = all statuses except Paid.
+app.use('/api/invoices',(req,res,next)=>['POST','PATCH','PUT','DELETE'].includes(req.method)?res.status(403).json({message:'Municipal administrator invoice access is read-only. Billing Staff must use the audited workflow.'}):next());
+
 app.post('/api/invoices', asyncHandler(async (req, res) => {
   const payload = req.body;
   if (!payload.vendor_id || !payload.date_issued) {

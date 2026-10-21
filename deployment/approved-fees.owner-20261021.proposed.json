@@ -1,0 +1,23 @@
+{
+  "targetCollection": "operation_fee_schedules",
+  "scope": "ph-quezon-calauag",
+  "createOnlyProposal": true,
+  "schedule": {
+    "status": "approved",
+    "version": 1,
+    "basis": "perAnimal",
+    "currency": "PHP",
+    "corralCents": 1500,
+    "deliveryCents": 2500,
+    "inspectionCents": 1000,
+    "facilityCents": 4500,
+    "syntheticOnly": false,
+    "approvalReference": "Owner-confirmed Cow/Pig fee policy 2026-10-21"
+  },
+  "supportedSpecies": [
+    "Cow",
+    "Pig"
+  ],
+  "totalCents": 9500,
+  "application": "Not applied. Before provisioning, read the existing schedule; if version 1 exists or differs, stop and propose the next version. Never overwrite invoice snapshots. No table fee."
+}

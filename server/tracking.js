@@ -1,3 +1,4 @@
+import {requireMeasured} from './owner-workflow-policy.js';
 const fail = (status,message,extra={}) => Object.assign(new Error(message),{status,...extra});
 const intervalMs=10000;
 const same = (a,b) => ['latitude','longitude','accuracyMeters','capturedAt'].every(k=>a[k]===b[k]);
@@ -46,9 +47,12 @@ export function createTrackingStore(getDb,validInvoice) {
       return db().runTransaction(async tx=>{
         await member(tx,p,true);const row=await invoice(tx,id,p,true),d=row.delivery;
         if(p.role!=='staff'||!d||d.assigneeUid!==p.uid)throw fail(403,'Only the assigned delivery staff can update this delivery.');
-        if(row.payment_status!=='Paid'||!(legacy?['assigned','in_transit']:['in_transit']).includes(d.status))throw fail(409,'Tracking requires an active delivery in transit.');
+        if(!(legacy?['assigned','in_transit']:['in_transit']).includes(d.status))throw fail(409,'Tracking requires an active delivery in transit.');
         if(typeof d.assignedAt!=='string'||!Number.isFinite(Date.parse(d.assignedAt)))throw fail(503,'Delivery assignment requires review.');
         if(legacy&&row.revision!==b.expectedRevision)throw fail(409,'Invoice changed. Refresh before submitting again.');
+        const animalSnap=await tx.get(db().doc('animal_records/'+row.animalId)),animal=animalSnap.exists?animalSnap.data():null;
+        if(!animal||animal.municipalScopeId!==row.municipalScopeId||animal.vendorBusinessId!==row.vendor_id||animal.revision!==row.animalRevision)throw fail(409,'Current measured shipment ownership requires review.');
+        requireMeasured(animal);
         const stored=await previous(tx,id,row);
         const old=stored&&stored.assigneeUid===d.assigneeUid&&stored.assignedAt===d.assignedAt?stored:null;
         if(old){

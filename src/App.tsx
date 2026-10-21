@@ -838,7 +838,7 @@ function DashboardPage({ loading, dashboard, loadError, onRetry }: { loading: bo
   const hasFees = dashboard.feeBreakdown.some((fee) => (fee.value ?? 0) > 0);
 
   return (
-    <div className="dashboard-composition dashboard-overview space-y-6">
+    <div className="dashboard-composition dashboard-overview space-y-6"><Link to="/billing" className="btn-secondary">Municipal invoice, payment, weight and delivery oversight</Link>
       <div role="status" aria-live="polite" aria-atomic="true" className={loading ? 'dashboard-feedback' : 'sr-only'}>
         {loading ? 'Refreshing dashboard… Previously loaded data is shown below.' : ''}
       </div>
@@ -1437,6 +1437,7 @@ function SlaughterRecordsPage({ vendors, records, loading, addRecord, updateReco
 }
 
 function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading, addInvoice, updateInvoice, deleteInvoice, showToast, municipality }: { vendors: Vendor[]; invoices: Invoice[]; slaughterRecords: SlaughterRecord[]; feeConfig: FeeConfig[]; loading: boolean; addInvoice: (payload: any) => Promise<void>; updateInvoice: (id: string, payload: any) => Promise<void>; deleteInvoice: (id: string) => Promise<void>; showToast: (msg: string, type?: 'success' | 'error') => void; municipality?: string }) {
+  const financialWritesAllowed=false; // This Web application admits municipal administrators for oversight only.
   const municipalityName = municipality || 'Calauag';
   const [pdfExportError, setPdfExportError] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -1577,13 +1578,11 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Invoices</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Track service billing, due dates, and payment status.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Administrator oversight is read-only. Billing Staff handles invoices and cash receipts through the audited workflow.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <DensityToggle value={density} onChange={setDensity} />
-          <button type="button" onClick={() => setIsAddOpen(true)} className="btn-primary">
-            Add Invoice
-          </button>
+          {financialWritesAllowed&&<button type="button" onClick={() => setIsAddOpen(true)} className="btn-primary">Add Invoice</button>}
         </div>
       </div>
 
@@ -1654,12 +1653,12 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => setSelectedInvoice(invoice)} className="icon-action" aria-label={`View invoice ${invoice.id}`}><Eye size={14} />View</button>
-                        {invoice.payment_status !== 'Paid' ? (
+                        {financialWritesAllowed&&(invoice.payment_status !== 'Paid' ? (
                           <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleStatusChange(invoice, 'Paid')} className="icon-action" aria-label={`Mark invoice ${invoice.id} paid`}>Mark Paid</button>
                         ) : (
                           <button type="button" disabled={actioningId === invoice.id} onClick={() => void handleStatusChange(invoice, 'Unpaid')} className="icon-action" aria-label={`Mark invoice ${invoice.id} unpaid`}>Mark Unpaid</button>
-                        )}
-                        <button type="button" disabled={actioningId === invoice.id} onClick={() => handleDelete(invoice)} className="icon-action icon-action-danger" aria-label={`Delete invoice ${invoice.id}`}><Trash2 size={14} />Delete</button>
+                        ))}
+                        {financialWritesAllowed&&<button type="button" disabled={actioningId === invoice.id} onClick={() => handleDelete(invoice)} className="icon-action icon-action-danger" aria-label={`Delete invoice ${invoice.id}`}><Trash2 size={14} />Delete</button>}
                       </div>
                     </td>
                   </tr>
@@ -1672,7 +1671,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
         )}
       </div>
 
-      {pendingDelete && (
+      {financialWritesAllowed&&pendingDelete && (
         <ConfirmDialog
           title="Delete invoice"
           message={`Delete invoice ${pendingDelete.id}? This cannot be undone.`}
@@ -1683,7 +1682,7 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
         />
       )}
 
-      {isAddOpen && (
+      {financialWritesAllowed&&isAddOpen && (
         <Modal title="Add Invoice" onClose={() => setIsAddOpen(false)}>
           <form onSubmit={submitInvoice} className="space-y-4">
             <div className="form-section">
@@ -1806,9 +1805,9 @@ function InvoicesPage({ vendors, invoices, slaughterRecords, feeConfig, loading,
             {pdfExportError && <p role="alert" className="no-print text-sm text-red-700 dark:text-red-300">{pdfExportError}</p>}
 
             <div className="modal-sticky-footer no-print flex flex-wrap justify-end gap-3">
-              <button type="button" onClick={() => void handleStatusChange(selectedInvoice, selectedInvoice.payment_status === 'Paid' ? 'Unpaid' : 'Paid')} disabled={actioningId === selectedInvoice.id} className="btn-secondary">
+              {financialWritesAllowed&&<button type="button" onClick={() => void handleStatusChange(selectedInvoice, selectedInvoice.payment_status === 'Paid' ? 'Unpaid' : 'Paid')} disabled={actioningId === selectedInvoice.id} className="btn-secondary">
                 {selectedInvoice.payment_status === 'Paid' ? 'Mark Unpaid' : 'Mark Paid'}
-              </button>
+              </button>}
               <button type="button" onClick={printReceipt} className="btn-secondary">Print</button>
               <button type="button" onClick={() => exportPdf(selectedInvoice)} className="btn-primary">Download PDF</button>
             </div>
