@@ -78,6 +78,8 @@ export function createOperationsStore(getDb, { production = false } = {}) {
   const assignmentInputs = async (tx,row,p) => {
     const animal=await read(tx,db().doc(`animal_records/${row.animalId}`));
     if(!animal||animal.municipalScopeId!==p.municipalScopeId||animal.vendorBusinessId!==row.vendor_id||animal.revision!==row.animalRevision)throw fail(409,'Refresh the invoiced animal ownership/revision.');
+    const organChoice=await read(tx,db().doc(`animal_organ_choices/${animal.id}`));
+    if(!organChoice||!['collect','decline'].includes(organChoice.choice)||organChoice.municipalScopeId!==p.municipalScopeId||organChoice.vendorBusinessId!==animal.vendorBusinessId||organChoice.animalRevision!==animal.revision)throw fail(409,'The owning Vendor must explicitly choose collect or decline organs/offal for this animal revision before assignment.');
     requireMeasured(animal);
     const vendor=await read(tx,db().doc(`vendors/${row.vendor_id}`));
     if(!vendor||vendor.status!=='Active'||vendor.municipalScopeId!==p.municipalScopeId||!text(vendor.name,200))throw fail(409,'Active vendor ownership requires review.');
@@ -150,6 +152,7 @@ export function createOperationsStore(getDb, { production = false } = {}) {
           if(b.method!=='cash')throw fail(400,'Record cash against an existing paper official receipt.');
           if(b.amountCents!==before.totalCents)throw fail(400,'Record the full invoice amount in centavos.');
           const reference=b.receiptReference.normalize('NFKC').trim().toUpperCase();
+          if(/^AINV-[0-9a-f]{40}$/i.test(reference))throw fail(400,'AINV is an internal bill reference. Enter the existing paper official-receipt number separately.');
           if(!text(reference,80))throw fail(400,'Use a printable receipt reference.');
           const reservation=db().doc(`operation_receipts/${hash(JSON.stringify([p.municipalScopeId,reference]))}`);
           if((await tx.get(reservation)).exists)throw fail(409,'This receipt reference has already been used.');

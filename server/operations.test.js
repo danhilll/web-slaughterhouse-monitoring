@@ -28,6 +28,8 @@ async function fixture(t,enabled=true,now=()=>new Date().toISOString(),productio
   rows.set('operation_fee_schedules/SCOPE',structuredClone(fees));
   for(const value of ['A','B'])rows.set(`animal_records/ANM-${value}`,{id:`ANM-${value}`,vendorBusinessId:'VEN-A',municipalScopeId:'SCOPE',revision:1,inspection:{status:'approved',revision:1},species:'Pig',weightGrams:85001,weighedAt:'2026-10-01T01:00:00Z',carcassWeight:{weightGrams:60000,animalRevision:1,revision:1,weighedAt:'2026-10-01T02:00:00Z',recordedBy:'inventory',recordedAt:'2026-10-01T02:00:00Z'},identifier:`TEST-${value}`});
   const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,email_verified:true,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
+  // Explicit synthetic Vendor choices; absent is never inferred as decline.
+  for(const value of ['A','B'])rows.set(`animal_organ_choices/ANM-${value}`,{animalId:`ANM-${value}`,municipalScopeId:'SCOPE',vendorBusinessId:'VEN-A',animalRevision:1,choice:'collect',revision:1});
   const animalStore={get:async value=>rows.get('animal_records/'+value)??null,membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
   const store=createOperationsStore(()=>db,{production:Boolean(production)}),app=express();
   app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:req=>req.animalUser}));
@@ -383,3 +385,18 @@ test('Inspector candidate/staff pagination is bounded, account-bound and exclude
  const rest=await f.call('/delivery-staff?cursor='+encodeURIComponent(first.body.nextCursor),'inspector');assert.equal(rest.status,200);assert.ok(rest.body.items.length<=25);assert.ok(rest.body.items.every(x=>!first.body.items.some(y=>x.uid===y.uid)));
  f.rows.set('managed_accounts/SYNTH-00',{uid:'SYNTH-00',role:'staff',status:'active',municipalScopeId:'OTHER',fullName:'Private foreign name'});const blocked=await f.call('/delivery-staff','inspector');assert.equal(blocked.status,503);assert.ok(!JSON.stringify(blocked.body).includes('Private foreign name'));
 });
+test('AINV internal bill reference cannot substitute for separate paper official-receipt number; rates ignore weight',async t=>{
+ const f=await fixture(t);f.rows.get('animal_records/ANM-A').carcassWeight.weightGrams=50001;f.rows.get('animal_records/ANM-B').carcassWeight.weightGrams=75001;
+ const a=(await f.call('/animals/ANM-A/invoice','billing',bill)).body,b=(await f.call('/animals/ANM-B/invoice','billing',bill)).body;assert.equal(a.total_amount,95);assert.equal(b.total_amount,95);assert.notEqual(a.id,b.id);
+ const before=structuredClone(f.rows.get('invoices/'+a.id));assert.equal((await f.call('/invoices/'+a.id+'/payment','billing',{...payment(1),receiptReference:a.id})).status,400);assert.deepEqual(f.rows.get('invoices/'+a.id),before);
+ const paid=await f.call('/invoices/'+a.id+'/payment','billing',{...payment(1),receiptReference:'PAPER-OR-TEST-001'});assert.equal(paid.status,200);assert.equal(paid.body.id,a.id);assert.equal(paid.body.payment.receiptReference,'PAPER-OR-TEST-001');assert.equal(paid.body.payment.amountCents,9500);
+});
+
+ test('Inspector assignment requires an explicit current owning-Vendor choice, without changing fees or measurement',async t=>{
+ const f=await fixture(t);const inv=(await f.call('/animals/ANM-A/invoice','billing',bill)).body;
+ const path=`/invoices/${inv.id}/delivery`,body={expectedRevision:1,assigneeUid:'delivery',destinationConfirmed:true,destination:'Synthetic market / Section A / Stall 1'};
+ const stored=f.rows.get('animal_organ_choices/ANM-A');f.rows.delete('animal_organ_choices/ANM-A');
+ const preview=await f.call(`/invoices/${inv.id}/assignment-options`,'inspector');assert.equal(preview.status,409);assert.match(preview.body.message,/explicitly choose/);const rejected=await f.call(path,'inspector',body);assert.equal(rejected.status,409);assert.equal(f.rows.get(`invoices/${inv.id}`).delivery,undefined);
+ for(const patch of [{choice:null},{choice:'decline',animalRevision:2},{choice:'collect',vendorBusinessId:'VEN-B'},{choice:'collect',municipalScopeId:'OTHER'}]){f.rows.set('animal_organ_choices/ANM-A',{...stored,...patch});assert.equal((await f.call(`/invoices/${inv.id}/assignment-options`,'inspector')).status,409);}
+ f.rows.set('animal_organ_choices/ANM-A',{...stored,choice:'decline'});const ready=await f.call(`/invoices/${inv.id}/assignment-options`,'inspector');assert.equal(ready.status,200);const assigned=await f.call(path,'inspector',{...body,destination:ready.body.destination});assert.equal(assigned.status,200);assert.equal(f.rows.get(`invoices/${inv.id}`).totalCents,9500);assert.equal(f.rows.get('animal_records/ANM-A').carcassWeight.weightGrams,60000);
+ });

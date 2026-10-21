@@ -19,7 +19,7 @@ const envPath = fileURLToPath(new URL('../.env', import.meta.url));
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 
 const production = loadProductionConfig();
-const routerConfig = domain => production ? { production, cursorSecret: production.cursorSecret(domain) } : {};
+const routerConfig = domain => production ? { production, cursorSecret: production.cursorSecret(domain), ...(domain === 'animals' ? {carcassWeightEnabled:production.features.carcass&&production.carcassDefinitionApproved} : {}) } : {};
 const app = express();
 const requestedPort = Number(process.argv[2] || process.env.PORT || 5000);
 const PORT = Number.isFinite(requestedPort) ? requestedPort : 5000;

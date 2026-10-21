@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {OWNER_OPERATIONS_POLICY} from './production-policy.js';
 import { readFileSync } from 'node:fs';
 import { loadProductionConfig, assertProductionProject } from './production-config.js';
 import { createAnimalRouter } from './animals.js';
@@ -49,7 +50,7 @@ test('exact projects, municipality, HTTPS origin and emulator exclusion fail clo
 });
 test('unresolved policies cannot enable carcass or financial/delivery recording',()=>{
   const f=fixture();
-  for(const key of ['carcass','billing','payment','delivery','tracking'])assert.throws(()=>load({...f,manifest:{...f.manifest,features:{[key]:true},policies:{fees:'approved',carcassDefinition:'approved',numbering:'approved',reversals:'approved'}}}),/keep these gates off/);
+  for(const key of ['carcass','billing','payment','delivery','tracking'])assert.throws(()=>load({...f,manifest:{...f.manifest,features:{[key]:true},policies:{fees:'approved',carcassDefinition:'approved',numbering:'approved',reversals:'approved'}}}),/required/);
   for(const features of [{animals:'true'},{animals:1},{typo:true},[],null])assert.throws(()=>load({...f,manifest:{...f.manifest,features}}),/feature/);
   assert.throws(()=>load({...f,manifest:{...f.manifest,features:{accountManagement:true}}}),/invitation API key/);
 });
@@ -58,4 +59,21 @@ test('cursor signing requires a stable secret and domain separates routers acros
   for(const secret of [undefined,'','short',' '.repeat(32),'placeholder-that-is-more-than-thirty-two-bytes'])assert.throws(()=>load({...f,env:{...f.env,CURSOR_SIGNING_SECRET:secret}}),/CURSOR_SIGNING_SECRET/);
   const a=load(f),b=load(f);assert.deepEqual(a.cursorSecret('animals'),b.cursorSecret('animals'));assert.notDeepEqual(a.cursorSecret('animals'),a.cursorSecret('operations'));assert.notDeepEqual(a.cursorSecret('animals'),a.cursorSecret('mobile'));
   for(const create of [createAnimalRouter,createOperationsRouter,createMobileRouter])assert.throws(()=>create({production:a}),/Stable production cursor/);
+});
+
+const completeTestDefinition=()=>JSON.parse(readFileSync(new URL('../deployment/owner-policy-activation.proposed.json',import.meta.url))).policies.carcassDefinition;
+test('organs exclusion alone cannot substitute for the approved local Pig/Cow definition',()=>{
+ const f=fixture();f.manifest.features={carcass:true};
+ for(const definition of [{status:'partial',organsIncluded:false,offalQuantitiesSeparate:true},{...completeTestDefinition(),headTreatment:null},{...completeTestDefinition(),hideTreatment:''},{...completeTestDefinition(),feetTreatment:'pending'},{...completeTestDefinition(),policyId:'pending'},{...completeTestDefinition(),organsIncluded:true},{...completeTestDefinition(),offalQuantitiesSeparate:false}])assert.throws(()=>load({...f,manifest:{...f.manifest,policies:{carcassDefinition:definition}}}),/definition/);
+ const c=load({...f,manifest:{...f.manifest,policies:{carcassDefinition:completeTestDefinition()}}});assert.equal(c.features.carcass,true);assert.equal(c.carcassDefinitionApproved,true);for(const k of ['billing','payment','delivery','tracking'])assert.equal(c.features[k],false);
+});
+test('each operations gate needs exact approved internal-AINV/separate-paper-receipt policy with corrections disabled',()=>{
+ const f=fixture();
+ for(const key of ['billing','payment','delivery','tracking']){
+  for(const policy of [null,{}, {...OWNER_OPERATIONS_POLICY,financialCorrections:true},{...OWNER_OPERATIONS_POLICY,billReference:'official_receipt'},{...OWNER_OPERATIONS_POLICY,officialReceipt:'AINV_internal'}])assert.throws(()=>load({...f,manifest:{...f.manifest,features:{[key]:true},policies:{operations:policy}}}),/owner operations policy/);
+  const c=load({...f,manifest:{...f.manifest,features:{[key]:true},policies:{operations:OWNER_OPERATIONS_POLICY}}});assert.deepEqual(Object.entries(c.features).filter(([,on])=>on).map(([name])=>name),[key]);assert.equal(c.ownerOperationsApproved,true);assert.equal(c.features.carcass,false);
+ }
+});
+test('owner local Pig/Cow definition is approved without enabling any of five gates',()=>{
+ const manifest=JSON.parse(readFileSync(new URL('../deployment/owner-policy-activation.proposed.json',import.meta.url)));const f=fixture();f.env={...f.env,FIREBASE_PROJECT_ID:manifest.projectId,VITE_FIREBASE_PROJECT_ID:manifest.projectId,MUNICIPAL_SCOPE_ID:manifest.municipalScopeId,VITE_FIREBASE_API_KEY:'synthetic-key'};const c=load({...f,manifest});assert.deepEqual(Object.entries(c.features).filter(([,on])=>on).map(([name])=>name),['accountManagement','activation','animals','inspection']);assert.equal(c.carcassDefinitionApproved,true);assert.equal(c.ownerOperationsApproved,true);for(const key of ['headTreatment','hideTreatment','feetTreatment'])assert.equal(manifest.policies.carcassDefinition[key],'included');for(const k of ['carcass','billing','payment','delivery','tracking'])assert.equal(c.features[k],false);
 });

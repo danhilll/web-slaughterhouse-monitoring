@@ -97,6 +97,33 @@ export function createAnimalStore(getDb) {
         return result.after;
       });
     },
+    async organCollection(id,p,body,at,enabled){
+      return db().runTransaction(async tx=>{
+        const snapshot=await tx.get(ref(id)),a=snapshot.exists?{...snapshot.data(),id:snapshot.id}:null;
+        if(!readable(a,p))throw fail(404,'Animal record not found.');
+        if(!validRecord(a))throw fail(503,'Animal record requires administrator review.');
+        const choiceRef=db().doc(`animal_organ_choices/${id}`),existing=await tx.get(choiceRef),before=existing.exists?existing.data():null;
+        if(before&&(before.animalId!==id||!validId(before.recordedBy)||!timestamp(before.recordedAt)||!['collect','decline'].includes(before.choice)||!Number.isSafeInteger(before.revision)||before.revision<1||!validId(before.vendorBusinessId)||!Number.isSafeInteger(before.animalRevision)||before.animalRevision<1||before.municipalScopeId!==a.municipalScopeId))throw fail(503,'Organ collection choice requires review.');
+        const invoice=a.billingInvoiceId?await tx.get(db().doc(`invoices/${a.billingInvoiceId}`)):null;
+        const locked=Boolean(a.deliveryId||(invoice?.exists&&invoice.data().delivery));
+        if(a.billingInvoiceId&&!invoice?.exists)throw fail(503,'Invoice linkage requires review.');
+        const canChoose=enabled&&p.role==='vendor'&&!locked;
+        let row=before;
+        if(body){
+          if(p.role!=='vendor')throw fail(403,'Only the owning Vendor may choose organ collection.');
+          if(!enabled)throw fail(503,'Organ collection recording is paused.');
+          if(locked)throw fail(409,'Organ collection is locked after delivery assignment.');
+          if(body.expectedRevision!==a.revision||body.expectedChoiceRevision!==(before?.revision??0))throw fail(409,'Refresh the animal and organ collection choice before retrying.');
+          await approvedVendor(tx,a.vendorBusinessId,p.municipalScopeId);
+          row={animalId:id,municipalScopeId:a.municipalScopeId,vendorBusinessId:a.vendorBusinessId,animalRevision:a.revision,choice:body.choice,revision:(before?.revision??0)+1,recordedAt:at,recordedBy:p.uid};
+          if(!Number.isSafeInteger(row.revision))throw fail(409,'Choice revision requires review.');
+          tx.set(choiceRef,row);
+          tx.create(db().collection('organ_collection_audit').doc(),{animalId:id,municipalScopeId:p.municipalScopeId,actorUid:p.uid,at,action:'vendor_organ_collection_chosen',before,after:row});
+        }
+        const current=Boolean(row&&row.vendorBusinessId===a.vendorBusinessId&&row.animalRevision===a.revision);
+        return {animalId:id,animalRevision:a.revision,choice:current?row.choice:null,choiceRevision:row?.revision??0,requiresReview:Boolean(row&&!current),canChoose};
+      });
+    },
     async history(id,scope){const result=await db().collection('animal_audit').where('animalId','==',id).where('municipalScopeId','==',scope).orderBy('at','desc').limit(20).get();return result.docs.map(d=>d.data());}
   };
 }
@@ -132,8 +159,9 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
   const readEnabled=production?true:enabled;
   const recordEnabled=production?production.features.animals:enabled;
   const inspectionEnabled=production?production.features.inspection:enabled;
-  // Only the isolated rehearsal adapter opts in. No production environment flag enables this.
-  router.get('/settings',(req,res)=>res.json({enabled:readEnabled,canRead:readEnabled&&animalReader(req.animalPrincipal),canReadHistory:readEnabled&&historyReader(req.animalPrincipal),animalReadOnly:readEnabled&&restrictedReader(req.animalPrincipal),canRecord:recordEnabled&&inventory(req.animalPrincipal),canInspect:inspectionEnabled&&req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false,carcassWeightEnabled:!production&&enabled&&carcassWeightEnabled===true,canRecordCarcassWeight:!production&&enabled&&carcassWeightEnabled===true&&inventory(req.animalPrincipal),carcassDefinitionStatus:'awaiting_confirmation'}));
+  // Explicit gate plus complete approved definition; the approved owner-local definition does not itself enable production recording.
+  const carcassEnabled=production?production.features.carcass===true&&production.carcassDefinitionApproved===true&&carcassWeightEnabled===true:enabled&&carcassWeightEnabled===true;
+  router.get('/settings',(req,res)=>res.json({enabled:readEnabled,canRead:readEnabled&&animalReader(req.animalPrincipal),canReadHistory:readEnabled&&historyReader(req.animalPrincipal),animalReadOnly:readEnabled&&restrictedReader(req.animalPrincipal),canRecord:recordEnabled&&inventory(req.animalPrincipal),canInspect:inspectionEnabled&&req.animalPrincipal.role==='inspector',billingAvailable:enabled&&(typeof operationsEnabled==='function'?operationsEnabled():operationsEnabled)&&(req.animalPrincipal.role==='admin'||req.animalPrincipal.role==='staff'&&req.animalPrincipal.staffPermissions.includes('billing')),deliveryAvailable:false,carcassWeightEnabled:carcassEnabled,canRecordCarcassWeight:carcassEnabled&&inventory(req.animalPrincipal),carcassDefinitionStatus:production?.carcassDefinitionApproved?'approved':'awaiting_confirmation'}));
   router.use((req,res,next)=>readEnabled?next():res.status(503).json({message:'Animal workflow is awaiting pilot activation.'}));
   const writeGate=feature=>(req,res,next)=>production&&production.features[feature]!==true
     ?res.status(503).json({message:'This production recording capability is paused.'}):next();
@@ -171,6 +199,16 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
     if(Object.keys(req.query).length)throw fail(400,'Vendor identity does not accept filters.');
     res.json(await store.inspectorVendor(req.params.id,p));
   }));
+  router.get('/:id/organ-collection',run(async(req,res)=>{
+    if(!animalReader(req.animalPrincipal))throw fail(403,'Animal access is unavailable.');
+    if(Object.keys(req.query).length)throw fail(400,'Unsupported organ collection filter.');
+    res.json(await store.organCollection(req.params.id,req.animalPrincipal,null,now(),carcassEnabled));
+  }));
+  router.post('/:id/organ-collection',writeGate('carcass'),run(async(req,res)=>{
+    const b=req.body;
+    if(Object.keys(req.query).length||!b||Array.isArray(b)||typeof b!=='object'||Object.keys(b).some(k=>!['choice','expectedRevision','expectedChoiceRevision'].includes(k))||!['collect','decline'].includes(b.choice)||!Number.isSafeInteger(b.expectedRevision)||b.expectedRevision<1||!Number.isSafeInteger(b.expectedChoiceRevision)||b.expectedChoiceRevision<0)throw fail(400,'Choose collect or decline explicitly with current animal and choice revisions.');
+    res.json(await store.organCollection(req.params.id,req.animalPrincipal,b,now(),carcassEnabled));
+  }));
   router.get('/:id/history',run(async(req,res)=>{if(!historyReader(req.animalPrincipal))throw fail(403,'Animal audit history is restricted to authorized personnel.');const a=await get(req);res.json({items:await store.history(a.id,req.animalPrincipal.municipalScopeId)});}));
   router.get('/:id',run(async(req,res)=>{if(!animalReader(req.animalPrincipal))throw fail(403,'Animal access is unavailable.');res.json(readView(await get(req),req.animalPrincipal));}));
   router.post('/',writeGate('animals'),run(async(req,res)=>{
@@ -202,7 +240,7 @@ export function createAnimalRouter({store,enabled=false,operationsEnabled=false,
   router.post('/:id/carcass-weight',writeGate('carcass'),run(async(req,res)=>{
     const p=req.animalPrincipal;
     if(!inventory(p))throw fail(403,'Inventory recording permission is required.');
-    if(carcassWeightEnabled!==true)throw fail(503,'Carcass recording is disabled pending slaughterhouse definition approval.');
+    if(!carcassEnabled)throw fail(503,'Carcass recording is disabled pending slaughterhouse definition approval.');
     const b=req.body,at=now();
     if(Object.keys(req.query).length || !b || Array.isArray(b) || typeof b!=='object' ||
         Object.keys(b).some(k=>!['weightGrams','weighedAt','expectedRevision','expectedCarcassRevision','reason'].includes(k)) ||

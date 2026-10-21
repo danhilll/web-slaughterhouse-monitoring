@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "mode": "production",
+  "projectId": "com-slaughterhouse-app",
+  "municipalScopeId": "ph-quezon-calauag",
+  "apiOrigin": "https://web-slaughterhouse-monitoring.onrender.com",
+  "features": {
+    "accountManagement": true,
+    "activation": true,
+    "animals": true,
+    "inspection": true,
+    "carcass": false,
+    "billing": false,
+    "payment": false,
+    "delivery": false,
+    "tracking": false
+  },
+  "policies": {
+    "operations": {
+      "status": "approved",
+      "version": 1,
+      "contract": "owner_policy_20261021_v1",
+      "billReference": "AINV_internal",
+      "officialReceipt": "paper_number_separate",
+      "financialCorrections": false
+    },
+    "carcassDefinition": {
+      "status": "approved",
+      "version": 1,
+      "policyId": "owner_local_pig_cow_20261022_v1",
+      "species": [
+        "Pig",
+        "Cow"
+      ],
+      "description": "Owner local operational definition for Pig and Cow, not a universal carcass standard. Measured post-slaughter weight includes head, skin/hide and feet; excludes organs/offal. Record an actual scale measurement, never copy live weight or an estimate.",
+      "organsIncluded": false,
+      "offalQuantitiesSeparate": true,
+      "headTreatment": "included",
+      "hideTreatment": "included",
+      "feetTreatment": "included",
+      "organCollection": "vendor_explicit_collect_or_decline",
+      "feeImpact": "none"
+    }
+  }
+}
