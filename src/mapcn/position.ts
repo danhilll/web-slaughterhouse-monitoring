@@ -17,3 +17,18 @@ export function tileRequest(url: string) {
  if(z>19 || !Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x>=2**z || y>=2**z) throw new Error('Map resource blocked');
  return {url, credentials:'same-origin' as const, referrerPolicy:'origin' as const};
 }
+
+export type DestinationPoint={latitude:number;longitude:number};
+export type MapMarkers={position:MapPoint|null;destination:DestinationPoint|null};
+export function parseDestinationPoint(value:unknown):DestinationPoint|null{
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const v=value as Record<string,unknown>;if(Object.keys(v).sort().join(',')!=='latitude,longitude'||typeof v.latitude!=='number'||!Number.isFinite(v.latitude)||Math.abs(v.latitude)>90||typeof v.longitude!=='number'||!Number.isFinite(v.longitude)||Math.abs(v.longitude)>180)return null;
+ return {latitude:v.latitude,longitude:v.longitude};
+}
+export function parseMapMarkers(value:unknown):MapMarkers|null{
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const v=value as Record<string,unknown>;
+ if(Object.keys(v).sort().join(',')!=='destination,position'){const legacy=parseMapPoint(value);return legacy?{position:legacy,destination:null}:null;}
+ const position=v.position===null?null:parseMapPoint(v.position),destination=v.destination===null?null:parseDestinationPoint(v.destination);
+ if(v.position!==null&&!position||v.destination!==null&&!destination)return null;return {position,destination};
+}

@@ -1,12 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import express from 'express';
 import { createOperationsStore, createOperationsRouter, syntheticOperationsEnabled, operationBillingView } from './operations.js';
-import { createAnimalMobileAuth } from './animals.js';
 
-const fees={status:'approved',version:1,basis:'perAnimal',currency:'PHP',corralCents:1500,deliveryCents:2500,inspectionCents:1000,facilityCents:4500,syntheticOnly:true};
-const bill={expectedRevision:1,feeScheduleVersion:1,dueDate:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())};
-const payment=revision=>({expectedRevision:revision,amountCents:9500,receiptReference:'TEST-RECEIPT',method:'cash'});
+import {fixture,fees,bill,payment} from './test-support/operations-fixture.js';
 test('feature flag cannot enable the new workflows on a live project or remote emulator host',()=>{
   const env={ANIMAL_OPERATIONS_ENABLED:'true',GCLOUD_PROJECT:'demo-test',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9199',FIRESTORE_EMULATOR_HOST:'127.0.0.1:8180'};
   assert.equal(syntheticOperationsEnabled(env,'demo-test'),true);
@@ -16,30 +12,7 @@ test('feature flag cannot enable the new workflows on a live project or remote e
   assert.equal(syntheticOperationsEnabled({...env,FIREBASE_AUTH_EMULATOR_HOST:undefined},'demo-test'),false);
   assert.equal(syntheticOperationsEnabled({...env,ANIMAL_OPERATIONS_ENABLED:'false'},'demo-test'),false);
 });
-async function fixture(t,enabled=true,now=()=>new Date().toISOString(),production=null) {
-  const rows=new Map();let sequence=0,queue=Promise.resolve();
-  const snap=ref=>({exists:rows.has(ref.path),id:ref.path.split('/').at(-1),data:()=>structuredClone(rows.get(ref.path))});
-  const doc=path=>({path,get:async()=>snap({path})});
-  const db={doc,collection:path=>({doc:()=>doc(`${path}/EVENT-${++sequence}`),where(field,op,value){const filters=[[field,op,value]];const q={where:(f,o,v)=>{filters.push([f,o,v]);return q;},orderBy:()=>q,startAfter:value=>{q.after=value;return q;},limit:n=>{q.limit=n;return q;},get:async()=>({docs:[...rows].filter(([key,row])=>key.startsWith(path+'/')&&filters.every(([f,o,v])=>{const actual=f.split('.').reduce((r,k)=>r?.[k],row);return o==='in'?v.includes(actual):actual===v;})&&(!q.after||key.split('/').at(-1)>q.after)).sort(([a],[b])=>a<b?-1:1).slice(0,q.limit).map(([path])=>snap({path}))})};return q;}}),runTransaction(fn){const result=queue.then(async()=>{const writes=[];const tx={get:async ref=>snap(ref),create:(ref,row)=>{if(rows.has(ref.path))throw Error('Already exists');writes.push([ref.path,row]);},set:(ref,row)=>writes.push([ref.path,row]),update:(ref,patch)=>writes.push([ref.path,{...rows.get(ref.path),...patch}])};const value=await fn(tx);for(const [path,row] of writes)rows.set(path,structuredClone(row));return value;});queue=result.catch(()=>{});return result;}};
-  const memberships={billing:{role:'staff',staffPermissions:['billing']},delivery:{role:'staff',staffPermissions:['delivery']},delivery2:{role:'staff',staffPermissions:['delivery']},multi:{role:'staff',staffPermissions:['billing','delivery']},inventory:{role:'staff',staffPermissions:['inventory']},inspector:{role:'inspector'},alice:{role:'vendor',vendorBusinessId:'VEN-A'},bob:{role:'vendor',vendorBusinessId:'VEN-B'},other:{role:'staff',staffPermissions:['billing'],municipalScopeId:'OTHER'},otherDelivery:{role:'staff',staffPermissions:['delivery'],municipalScopeId:'OTHER'}};
-  for(const [uid,m] of Object.entries(memberships)){m.status='active';m.municipalScopeId??='SCOPE';rows.set(`mobile_memberships/${uid}`,m);}
-  for(const value of ['A','B'])rows.set(`vendors/VEN-${value}`,{id:`VEN-${value}`,name:`Synthetic ${value}`,marketName:'Synthetic Market',marketSection:'Meat',stallNumber:value,status:'Active',municipalScopeId:'SCOPE'});
-  for(const value of ['A','B']){const v=rows.get('vendors/VEN-'+value);const {stallReservationKey}=await import('./owner-workflow-policy.js');rows.set('market_stall_assignments/'+stallReservationKey(v),{vendorBusinessId:v.id,municipalScopeId:'SCOPE',marketName:v.marketName,marketSection:v.marketSection,stallNumber:v.stallNumber});}
-  rows.set('operation_fee_schedules/SCOPE',structuredClone(fees));
-  for(const value of ['A','B'])rows.set(`animal_records/ANM-${value}`,{id:`ANM-${value}`,vendorBusinessId:'VEN-A',municipalScopeId:'SCOPE',revision:1,inspection:{status:'approved',revision:1},species:'Pig',weightGrams:85001,weighedAt:'2026-10-01T01:00:00Z',carcassWeight:{weightGrams:60000,animalRevision:1,revision:1,weighedAt:'2026-10-01T02:00:00Z',recordedBy:'inventory',recordedAt:'2026-10-01T02:00:00Z'},identifier:`TEST-${value}`});
-  const auth={verifyIdToken:async token=>{if(token==='expired')throw {code:'auth/id-token-expired'};return {uid:token,email_verified:true,municipalRole:memberships[token]?.role,municipalScopeId:memberships[token]?.municipalScopeId};}};
-  // Explicit synthetic Vendor choices; absent is never inferred as decline.
-  for(const value of ['A','B'])rows.set(`animal_organ_choices/ANM-${value}`,{animalId:`ANM-${value}`,municipalScopeId:'SCOPE',vendorBusinessId:'VEN-A',animalRevision:1,choice:'collect',revision:1});
-  const animalStore={get:async value=>rows.get('animal_records/'+value)??null,membership:async uid=>memberships[uid],vendor:async value=>rows.get(`vendors/${value}`),list:async p=>[...rows].filter(([key,row])=>key.startsWith('animal_records/')&&row.municipalScopeId===p.municipalScopeId).map(([,row])=>row)};
-  const store=createOperationsStore(()=>db,{production:Boolean(production)}),app=express();
-  app.use(express.json());app.use('/api/mobile/operations',createAnimalMobileAuth(()=>auth,animalStore),createOperationsRouter({store,animalStore,enabled,now,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:req=>req.animalUser}));
-  app.use('/api/operations',createOperationsRouter({store,animalStore,enabled,now,production,cursorSecret:Buffer.alloc(32,1),getPrincipal:()=>({uid:'ADMIN',role:'admin',municipalScopeId:'SCOPE',staffPermissions:[]})}));
-  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const rawCall=async(path,who='billing',body)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/mobile/operations${path}`,{method:body?'POST':'GET',headers:{...(who?{Authorization:`Bearer ${who}`} : {}),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
-  const call=rawCall;
-  const webCall=async(path,body)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/operations${path}`,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
-  return {rows,memberships,call,rawCall,store,now,webCall};
-}
+
 async function inTransit(f){const inv=(await f.call('/animals/ANM-A/invoice','billing',{...bill,dueDate:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(f.now()))})).body;await f.call(`/invoices/${inv.id}/payment`,'billing',payment(1));await f.call(`/invoices/${inv.id}/delivery`,'inspector',{destinationConfirmed:true,expectedRevision:2,assigneeUid:'delivery',destination:'Synthetic Market / Meat / Stall A'});await f.call(`/invoices/${inv.id}/delivery/status`,'delivery',{expectedRevision:3,status:'in_transit',notes:'Departed'});return inv.id;}
 
 test('tracking updates one position without changing financial revision or audit',async t=>{

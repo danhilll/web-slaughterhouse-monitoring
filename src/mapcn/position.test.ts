@@ -17,3 +17,10 @@ test('tile-only transform rejects query credentials, alternate hosts and applica
  assert.deepEqual(tileRequest('https://tile.openstreetmap.org/16/500/500.png'),{url:'https://tile.openstreetmap.org/16/500/500.png',credentials:'same-origin',referrerPolicy:'origin'});
  for(const url of ['/api/me','https://tile.openstreetmap.org/20/1/1.png','https://tile.openstreetmap.org/1/2/1.png','https://tile.openstreetmap.org/1/1/1.png?token=x','https://evil.example/1/1/1.png','https://user:pass@tile.openstreetmap.org/1/1/1.png','http://tile.openstreetmap.org/1/1/1.png','https://tile.openstreetmap.org.evil/1/1/1.png'])assert.throws(()=>tileRequest(url),/blocked/);
 });
+import {parseDestinationPoint,parseMapMarkers} from './position.ts';
+test('destination and shared GPS markers stay distinct, including destination-only and honest empty states',()=>{
+ const destination={latitude:1.25,longitude:2.5},position={latitude:3.25,longitude:4.5,accuracyMeters:25};
+ for(const value of [{position,destination},{position:null,destination},{position,destination:null},{position:null,destination:null}])assert.deepEqual(parseMapMarkers(value),value);
+ assert.deepEqual(parseMapMarkers(position),{position,destination:null});
+ assert.equal(parseMapMarkers({position:null,destination:{...destination,accuracyMeters:1}}),null);assert.equal(parseMapMarkers({position,destination,token:'private'}),null);assert.equal(parseDestinationPoint({latitude:91,longitude:2}),null);assert.equal(parseDestinationPoint({latitude:'1',longitude:2}),null);
+});

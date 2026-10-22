@@ -13,3 +13,9 @@ test('invoice preview requires selected ownership/scope/revision and exact itemi
  validateInvoicePreview(preview,selected);
  for(const p of [{...preview,vendor:{id:'OTHER',name:'Other'}},{...preview,animal:{...selected,municipalScopeId:'OTHER'}},{...preview,animal:{...selected,revision:2}},{...preview,totalCents:9400},{...preview,feeSchedule:{...preview.feeSchedule,facilityCents:0.5}},{...preview,currency:'USD'},{...preview,projection:'legacy'}])assert.throws(()=>validateInvoicePreview(p,selected),/requires review/);
 });
+import {validateRecordedFeeSnapshot} from './operationsWorkspace.ts';
+test('recorded fee snapshot agrees with stored itemization and version without imposing current rates on history',()=>{
+ const f={version:1,basis:'perAnimal',currency:'PHP',corralCents:1500,deliveryCents:2500,inspectionCents:1000,facilityCents:4500};const v={feeScheduleVersion:1,feeScheduleSnapshot:f,totalCents:9500,corral_fee:15,delivery_fee:25,anti_mortem_fee:10,facility_fee:45};validateRecordedFeeSnapshot(v);
+ for(const bad of [{...v,feeScheduleVersion:2},{...v,feeScheduleSnapshot:{...f,facilityCents:0}},{...v,totalCents:9600},{...v,corral_fee:16}])assert.throws(()=>validateRecordedFeeSnapshot(bad));
+ validateRecordedFeeSnapshot({...v,totalCents:9600,corral_fee:16,feeScheduleSnapshot:{...f,version:2,corralCents:1600},feeScheduleVersion:2});validateRecordedFeeSnapshot({totalCents:7500});
+});
