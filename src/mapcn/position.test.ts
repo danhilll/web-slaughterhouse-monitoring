@@ -24,3 +24,8 @@ test('destination and shared GPS markers stay distinct, including destination-on
  assert.deepEqual(parseMapMarkers(position),{position,destination:null});
  assert.equal(parseMapMarkers({position:null,destination:{...destination,accuracyMeters:1}}),null);assert.equal(parseMapMarkers({position,destination,token:'private'}),null);assert.equal(parseDestinationPoint({latitude:91,longitude:2}),null);assert.equal(parseDestinationPoint({latitude:'1',longitude:2}),null);
 });
+test('drop-off is an independent optional numeric marker; legacy frames and identity restrictions remain',()=>{
+ const dropOff={latitude:5.25,longitude:6.5},destination={latitude:1.25,longitude:2.5},position={latitude:3.25,longitude:4.5,accuracyMeters:12};
+ for(const v of [{position,destination,dropOff},{position:null,destination:null,dropOff},{position:null,destination,dropOff:null}])assert.deepEqual(parseMapMarkers(v),v);
+ for(const dropOff of [{latitude:91,longitude:2},{latitude:'1',longitude:2},{latitude:1,longitude:2,source:'device'},{latitude:1,longitude:2,token:'x'}])assert.equal(parseMapMarkers({position:null,destination:null,dropOff}),null);
+});

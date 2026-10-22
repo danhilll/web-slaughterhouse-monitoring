@@ -1,3 +1,4 @@
+import {dropOffReadable,dropOffProjection,validateDropOffPoint} from './drop-off-point.js';
 import {validCoordinates,validReviewedDestination,validateDestinationPin,pinMatches,destinationProjection,destinationReadable} from './destination-map.js';
 import {billingWriter,inspectorAssigner,requireMeasured,measuredCurrent,validateOwnerFees,stallDestination,stallReservationKey} from './owner-workflow-policy.js';
 import { Router } from 'express';
@@ -116,6 +117,18 @@ export function createOperationsStore(getDb, { production = false } = {}) {
     async assignmentOptions(value,p){
       if(!inspectorAssigner(p))throw fail(403,'Inspector assignment authority is required.');
       return db().runTransaction(async tx=>{const row=await read(tx,invoice(value));if(!scopeRead(row,p))throw fail(404,'Invoice not found.');if(!validInvoice(row)||row.delivery)throw fail(409,'Refresh an unassigned invoice.');const {vendor,destination}=await assignmentInputs(tx,row,p);return {invoiceId:row.id,revision:row.revision,animalId:row.animalId,vendorBusinessId:vendor.id,vendorName:vendor.name,destination,marketName:vendor.marketName,marketSection:vendor.marketSection,stallNumber:vendor.stallNumber};});
+    },
+    async dropOffRead(value,p){
+      return db().runTransaction(async tx=>{const row=await read(tx,invoice(value));if(!dropOffReadable(row,p))throw fail(404,'Delivery drop-off point not found.');if(!validInvoice(row))throw fail(503,'Invoice requires review.');const point=await read(tx,db().doc(`delivery_drop_off_points/${row.id}`));if(point)validateDropOffPoint(point,row);return dropOffProjection(row,point,p);});
+    },
+    async dropOffWrite(value,b,p,at){
+      if(p.role!=='staff'||!p.staffPermissions?.includes('delivery'))throw fail(403,'Only assigned Delivery Staff may select a drop-off point.');
+      return db().runTransaction(async tx=>{
+        const row=await read(tx,invoice(value));if(!dropOffReadable(row,p))throw fail(404,'Delivery drop-off point not found.');if(!validInvoice(row))throw fail(503,'Invoice requires review.');if(!['assigned','in_transit'].includes(row.delivery.status))throw fail(409,'Drop-off changes are unavailable after delivery completion.');if(row.revision!==b.expectedRevision)throw fail(409,'Delivery changed. Refresh before confirming the drop-off point.');
+        const ref=db().doc(`delivery_drop_off_points/${row.id}`),before=await read(tx,ref);if(before)validateDropOffPoint(before,row);if((before?.revision??0)!==b.expectedDropOffRevision)throw fail(409,'Drop-off point changed. Refresh before confirming again.');const revision=(before?.revision??0)+1;if(!Number.isSafeInteger(revision))throw fail(409,'Drop-off revision requires review.');
+        const after={invoiceId:row.id,municipalScopeId:row.municipalScopeId,vendorBusinessId:row.vendor_id,assigneeUid:row.delivery.assigneeUid,latitude:b.latitude,longitude:b.longitude,selectionMethod:b.selectionMethod,selectedAt:at,selectedBy:p.uid,revision};validateDropOffPoint(after,row);
+        tx.set(ref,after);tx.create(db().collection('delivery_drop_off_audit').doc(),{invoiceId:row.id,municipalScopeId:row.municipalScopeId,actorUid:p.uid,at,action:before?'drop_off_updated':'drop_off_selected',before,after});return dropOffProjection(row,after,p);
+      });
     },
     async destinationRead(value,p){
       return db().runTransaction(async tx=>{
@@ -336,6 +349,10 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     const tracking=await store.trackingRead(row.id,req.principal,now()),after=await store.get(row.id);if(after?.revision!==row.revision)throw fail(409,'Invoice changed during refresh. Refresh the oversight view.');
     const pick=(value,keys)=>Object.fromEntries(keys.filter(k=>value?.[k]!==undefined).map(k=>[k,value[k]]));
     res.json({projection:'municipal_oversight_v1',invoice:operationBillingView(row),animal:{...pick(animal,['id','identifier','species','revision','weightGrams','weighedAt','carcassEstimate']),inspection:pick(animal.inspection,['status','revision','decidedAt']),carcassWeight:animal.carcassWeight?pick(animal.carcassWeight,['weightGrams','weighedAt','animalRevision','revision']):null},assignment:row.delivery?deliveryAssignmentView(row,animal):null,tracking,refreshedAt:now(),consistency:'Read-only reconciliation; latest location has its own capture/receive times, not an accounting snapshot.'});
+  }));
+  router.get('/invoices/:id/drop-off-point',run(async(req,res)=>{if(Object.keys(req.query).length)throw fail(400,'Unsupported drop-off filter.');const view=await store.dropOffRead(req.params.id,req.principal);view.canUpdate=Boolean(view.canUpdate&&req.operationsEnabled&&(!production||production.features.delivery===true));res.json(view);}));
+  router.post('/invoices/:id/drop-off-point',writeGate('delivery'),run(async(req,res)=>{
+    const b=body(req,['latitude','longitude','expectedRevision','expectedDropOffRevision','selectionMethod','confirmed']);if(Object.keys(req.query).length||!validCoordinates(b.latitude,b.longitude)||!Number.isSafeInteger(b.expectedDropOffRevision)||b.expectedDropOffRevision<0||!['map_tap','device_location'].includes(b.selectionMethod)||b.confirmed!==true)throw fail(400,'Confirm valid drop-off coordinates, selection method and current revisions.');res.json(await store.dropOffWrite(req.params.id,b,req.principal,now()));
   }));
   router.get('/invoices/:id/destination-map',run(async(req,res)=>{if(Object.keys(req.query).length)throw fail(400,'Unsupported destination filter.');res.json(await store.destinationRead(req.params.id,req.principal));}));
   router.post('/invoices/:id/destination-map',writeGate('delivery'),run(async(req,res)=>{

@@ -19,7 +19,7 @@ export function tileRequest(url: string) {
 }
 
 export type DestinationPoint={latitude:number;longitude:number};
-export type MapMarkers={position:MapPoint|null;destination:DestinationPoint|null};
+export type MapMarkers={position:MapPoint|null;destination:DestinationPoint|null;dropOff?:DestinationPoint|null};
 export function parseDestinationPoint(value:unknown):DestinationPoint|null{
  if(!value||typeof value!=='object'||Array.isArray(value))return null;
  const v=value as Record<string,unknown>;if(Object.keys(v).sort().join(',')!=='latitude,longitude'||typeof v.latitude!=='number'||!Number.isFinite(v.latitude)||Math.abs(v.latitude)>90||typeof v.longitude!=='number'||!Number.isFinite(v.longitude)||Math.abs(v.longitude)>180)return null;
@@ -28,7 +28,7 @@ export function parseDestinationPoint(value:unknown):DestinationPoint|null{
 export function parseMapMarkers(value:unknown):MapMarkers|null{
  if(!value||typeof value!=='object'||Array.isArray(value))return null;
  const v=value as Record<string,unknown>;
- if(Object.keys(v).sort().join(',')!=='destination,position'){const legacy=parseMapPoint(value);return legacy?{position:legacy,destination:null}:null;}
+ const keys=Object.keys(v).sort().join(',');if(!['destination,position','destination,dropOff,position'].includes(keys)){const legacy=parseMapPoint(value);return legacy?{position:legacy,destination:null}:null;}
  const position=v.position===null?null:parseMapPoint(v.position),destination=v.destination===null?null:parseDestinationPoint(v.destination);
- if(v.position!==null&&!position||v.destination!==null&&!destination)return null;return {position,destination};
+ if(v.position!==null&&!position||v.destination!==null&&!destination)return null;const dropOff=v.dropOff===undefined||v.dropOff===null?null:parseDestinationPoint(v.dropOff);if(v.dropOff!==undefined&&v.dropOff!==null&&!dropOff)return null;return keys==='destination,position'?{position,destination}:{position,destination,dropOff};
 }
