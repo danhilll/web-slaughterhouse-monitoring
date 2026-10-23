@@ -19,6 +19,9 @@ export function DeliveryTrackingPanel({ invoiceId, onClose, deliveryCompleted = 
   useEffect(() => {
     completedRef.current = deliveryCompleted;
     setData(null); setError(''); setShowMap(false);
+  }, [invoiceId]);
+  useEffect(() => {
+    if (deliveryCompleted) completedRef.current = true;
     const tick = deliveryCompleted ? undefined : setInterval(() => { if (!document.hidden) setClock(Date.now()); }, 1000);
     const stop = deliveryCompleted ? () => {} : startTrackingPolling({ invoiceId, visibility: document,
       request: signal => apiFetch(`/api/operations/invoices/${encodeURIComponent(invoiceId)}/tracking`, { signal }),
