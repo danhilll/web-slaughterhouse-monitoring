@@ -20,12 +20,13 @@ const municipalDate = at => {
 const permission = (p, name) => p.role === 'admin' || p.role === 'staff' && p.staffPermissions.includes(name);
 const scopeRead = (row, p) => row?.municipalScopeId === p.municipalScopeId && (p.role !== 'vendor' || row.vendor_id === p.vendorBusinessId);
 const invoiceKeys = ['id','vendor_id','vendor_name','municipalScopeId','slaughter_record_id','date_issued','due_date','number_of_heads_cow','number_of_heads_pig','corral_fee','delivery_fee','anti_mortem_fee','facility_fee','total_amount','payment_status','animalId','animalRevision','animalIdentifier','revision','feeScheduleVersion','syntheticOnly','payment','delivery'];
-export const operationInvoiceView = row => {
+// Audit snapshots retain the stored legacy coordinate; responses hide it once delivery is completed.
+export const operationInvoiceView = (row, retainLocation = false) => {
   const pick=(source,keys)=>Object.fromEntries(keys.filter(key=>source[key]!==undefined).map(key=>[key,source[key]]));
   const result=pick(row,invoiceKeys);
   if(row.feeScheduleSnapshot)result.feeScheduleSnapshot=pick(row.feeScheduleSnapshot,['version','basis','currency','corralCents','deliveryCents','inspectionCents','facilityCents','syntheticOnly','approvalReference']);
   if(row.payment)result.payment=pick(row.payment,['receiptReference','amountCents','method','recordedAt']);
-  if(row.delivery){result.delivery=pick(row.delivery,['assigneeUid','destination','status','notes','assignedAt','updatedAt','deliveredAt']);if(row.delivery.location)result.delivery.location=pick(row.delivery.location,['latitude','longitude','accuracyMeters','capturedAt','receivedAt']);}
+  if(row.delivery){result.delivery=pick(row.delivery,['assigneeUid','destination','status','notes','assignedAt','updatedAt','deliveredAt']);if(row.delivery.location&&(retainLocation||row.delivery.status!=='delivered'))result.delivery.location=pick(row.delivery.location,['latitude','longitude','accuracyMeters','capturedAt','receivedAt']);}
   return result;
 };
 export const operationBillingView = row => {
@@ -60,7 +61,7 @@ export function createOperationsStore(getDb, { production = false } = {}) {
   const db = () => { const value = getDb(); if (!value) throw fail(503, 'Workflow storage is unavailable.'); return value; };
   const invoice = value => db().doc(`invoices/${value}`);
   const read = async (tx, ref) => { const snap = await tx.get(ref); if (!snap.exists) return null; const row = snap.data(); if (row.id !== undefined && row.id !== snap.id) throw fail(503,'Record identity requires review.'); return {...row,id:snap.id}; };
-  const audited = (tx, p, row, action, at, before = null) => tx.create(db().collection('operation_audit').doc(), {invoiceId:row.id,animalId:row.animalId,municipalScopeId:p.municipalScopeId,actorUid:p.uid,action,at,...(before?{before:operationInvoiceView(before)}:{}),after:operationInvoiceView(row)});
+  const audited = (tx, p, row, action, at, before = null) => tx.create(db().collection('operation_audit').doc(), {invoiceId:row.id,animalId:row.animalId,municipalScopeId:p.municipalScopeId,actorUid:p.uid,action,at,...(before?{before:operationInvoiceView(before,true)}:{}),after:operationInvoiceView(row,true)});
   const invoiceIdFor = (scope,animalId) => `AINV-${hash(JSON.stringify([scope,animalId])).slice(0,40)}`;
   // The same read set validates a preview and is re-read atomically at issuance.
   const invoiceInputs = async (tx,animalId,p) => {
