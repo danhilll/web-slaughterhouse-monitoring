@@ -50,7 +50,7 @@ export function startTrackingPolling(options: {
       if (disposed || current.signal.aborted) return;
       if (!response.ok) throw new Error(body.message || 'Tracking unavailable.');
       const data = validateTracking(body, options.invoiceId);
-      ended = data.deliveryStatus === 'delivered'; options.onData(data); options.onError('');
+      ended = data.deliveryStatus === 'delivered'; options.onData(ended ? {...data, location:null} : data); options.onError('');
     } catch (e) {
       if (!disposed && (timedOut || !current.signal.aborted))
         options.onError(timedOut ? 'Tracking request timed out. Retrying when visible.' : (e as Error).message);

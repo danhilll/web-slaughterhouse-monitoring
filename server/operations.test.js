@@ -34,7 +34,8 @@ test('vendor map reads remain isolated after completion and membership removal',
   assert.equal((await f.call(path,'delivery',{latitude:13.96,longitude:122.29,accuracyMeters:12,capturedAt:new Date().toISOString()})).status,200);
   assert.equal((await f.call(`/invoices/${id}/delivery/status`,'delivery',{expectedRevision:4,status:'delivered',notes:'Test completion'})).status,200);
   const own=await f.call(path,'alice');
-  assert.equal(own.status,200);assert.equal(own.body.trackingState,'completed');assert.equal(own.body.location.latitude,13.96);
+  assert.equal(own.status,200);assert.equal(own.body.trackingState,'completed');assert.equal(own.body.location,null);
+  assert.equal(f.rows.get(`delivery_positions/${id}`).latitude,13.96);
   const other=await f.call(path,'bob');assert.equal(other.status,404);assert.equal(other.body.location,undefined);
   f.memberships.alice.status='inactive';const revoked=await f.call(path,'alice');
   assert.equal(revoked.status,403);assert.equal(revoked.body.location,undefined);

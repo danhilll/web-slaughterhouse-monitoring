@@ -53,6 +53,7 @@ test('temporary errors preserve old fix; recovery and completion stop polling', 
     onData: d => seen.push(d), onError: e => errors.push(e),
   });
   await sleep(100); stop(); assert.equal(calls, 3); assert.equal(seen.length, 2); assert.ok(!seen.includes(null)); assert.ok(errors.includes('Offline'));
+  assert.equal((seen[1] as Tracking).location, null);
 });
 test('rate limit survives visibility changes without extra requests', async () => {
   const visibility = new Visibility(); let calls = 0;
