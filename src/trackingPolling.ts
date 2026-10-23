@@ -11,9 +11,9 @@ export function validateTracking(body: Tracking, invoiceId: string): Tracking {
   return body;
 }
 export function trackingLabel(data: Tracking | null, error: string, age: number | null): string {
+  if (data?.deliveryStatus === 'delivered') return 'Delivery completed';
   if (error) return 'Connection unavailable';
   if (!data) return 'Loading location…';
-  if (data.deliveryStatus === 'delivered') return 'Delivery completed';
   if (data.deliveryStatus !== 'in_transit') return 'Tracking not started';
   if (!data.location) return 'Waiting for location';
   return age !== null && age > 45 ? 'Location outdated' : 'Recent location';
@@ -50,7 +50,7 @@ export function startTrackingPolling(options: {
       if (disposed || current.signal.aborted) return;
       if (!response.ok) throw new Error(body.message || 'Tracking unavailable.');
       const data = validateTracking(body, options.invoiceId);
-      ended = data.deliveryStatus === 'delivered'; options.onData(data); options.onError('');
+      ended = data.deliveryStatus === 'delivered'; options.onData(ended ? {...data, location:null} : data); options.onError('');
     } catch (e) {
       if (!disposed && (timedOut || !current.signal.aborted))
         options.onError(timedOut ? 'Tracking request timed out. Retrying when visible.' : (e as Error).message);

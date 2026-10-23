@@ -13,6 +13,7 @@ test('status distinguishes waiting, stale, completion and connection failure', (
   assert.equal(trackingLabel(view, '', 46), 'Location outdated');
   assert.equal(trackingLabel(view, '', 2), 'Recent location');
   assert.equal(trackingLabel({ ...view, deliveryStatus: 'delivered' }, '', 200), 'Delivery completed');
+  assert.equal(trackingLabel({ ...view, deliveryStatus: 'delivered' }, 'offline', 200), 'Delivery completed');
   assert.equal(trackingLabel(view, 'offline', 2), 'Connection unavailable');
   assert.throws(() => validateTracking({ ...view, invoiceId: 'OTHER' }, 'INV'));
   assert.throws(() => validateTracking({ ...view, location: { ...view.location!, latitude: 91 } }, 'INV'));
@@ -52,7 +53,8 @@ test('temporary errors preserve old fix; recovery and completion stop polling', 
     request: async () => { calls++; return calls === 2 ? Response.json({ message: 'Offline' }, { status: 503 }) : Response.json(calls === 1 ? view : { ...view, deliveryStatus: 'delivered' }); },
     onData: d => seen.push(d), onError: e => errors.push(e),
   });
-  await sleep(100); stop(); assert.equal(calls, 3); assert.equal(seen.length, 2); assert.ok(!seen.includes(null)); assert.ok(errors.includes('Offline'));
+  await sleep(100); visibility.change(true); visibility.change(false); await sleep(15); stop(); assert.equal(calls, 3); assert.equal(seen.length, 2); assert.ok(!seen.includes(null)); assert.ok(errors.includes('Offline'));
+  assert.equal((seen[1] as Tracking).location, null);
 });
 test('rate limit survives visibility changes without extra requests', async () => {
   const visibility = new Visibility(); let calls = 0;
