@@ -8,7 +8,7 @@ import {createServer} from 'vite';import react from '@vitejs/plugin-react';
 import {fixture,bill,payment} from '../server/test-support/operations-fixture.js';
 import {registerWebAssets} from '../server/hosting.js';
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
-const repo=fileURLToPath(new URL('../',import.meta.url)),tmp=await mkdtemp(path.join(repo,'.dropoff-e2e-')),evidence='/Users/johnvianneynoscal/Developer/Web-Completion-Release-Evidence-20261023/browser';await mkdir(evidence,{recursive:true});let cleanup,server,browser,debugPage;const diagnostics=[];
+const repo=fileURLToPath(new URL('../',import.meta.url)),tmp=await mkdtemp(path.join(repo,'.dropoff-e2e-')),evidence=process.env.COMPLETION_EVIDENCE_DIR||path.join(repo,'.browser-evidence');await mkdir(evidence,{recursive:true});let cleanup,server,browser,debugPage;const diagnostics=[];
 let at=new Date().toISOString();const f=await fixture({after:fn=>{cleanup=fn;}},true,()=>at);registerWebAssets(f.app,{enabled:true,directory:path.join(repo,'dist')});const checks=[];
 try{
  const inv=(await f.call('/animals/ANM-A/invoice','billing',bill)).body;
