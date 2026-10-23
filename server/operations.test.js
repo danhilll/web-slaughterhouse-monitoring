@@ -374,3 +374,13 @@ test('AINV internal bill reference cannot substitute for separate paper official
  for(const patch of [{choice:null},{choice:'decline',animalRevision:2},{choice:'collect',vendorBusinessId:'VEN-B'},{choice:'collect',municipalScopeId:'OTHER'}]){f.rows.set('animal_organ_choices/ANM-A',{...stored,...patch});assert.equal((await f.call(`/invoices/${inv.id}/assignment-options`,'inspector')).status,409);}
  f.rows.set('animal_organ_choices/ANM-A',{...stored,choice:'decline'});const ready=await f.call(`/invoices/${inv.id}/assignment-options`,'inspector');assert.equal(ready.status,200);const assigned=await f.call(path,'inspector',{...body,destination:ready.body.destination});assert.equal(assigned.status,200);assert.equal(f.rows.get(`invoices/${inv.id}`).totalCents,9500);assert.equal(f.rows.get('animal_records/ANM-A').carcassWeight.weightGrams,60000);
  });
+test('completed invoice reads hide legacy shared coordinates while retaining stored history',async t=>{
+  const f=await fixture(t),id=await inTransit(f),path=`/invoices/${id}`;
+  const legacy=await f.call(path+'/delivery/location','delivery',{expectedRevision:4,latitude:13.96,longitude:122.29,accuracyMeters:10,capturedAt:new Date().toISOString()});
+  assert.equal(legacy.status,200);assert.equal(legacy.body.delivery.location.latitude,13.96);
+  const done=await f.call(path+'/delivery/status','delivery',{expectedRevision:4,status:'delivered',notes:'Test completion'});
+  assert.equal(done.status,200);assert.equal(done.body.delivery.status,'delivered');assert.ok(!('location' in done.body.delivery));
+  for(const actor of ['alice','delivery','billing']){const r=await f.call(path,actor);assert.equal(r.status,200);assert.equal(r.body.delivery.status,'delivered');assert.ok(!('location' in r.body.delivery),actor);}
+  const list=await f.call('/invoices','alice');assert.ok(list.body.items.every(row=>!row.delivery?.location));
+  assert.equal(f.rows.get(`invoices/${id}`).delivery.location.latitude,13.96);
+});
