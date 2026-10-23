@@ -10,8 +10,9 @@ export function validatePosition(b,at,maxAgeMs=60000) {
 const publicLocation=p=>p?Object.fromEntries(['latitude','longitude','accuracyMeters','capturedAt','receivedAt'].map(k=>[k,p[k]])):null;
 export function trackingView(row,point,at) {
   const matching=point&&point.invoiceId===row.id&&point.municipalScopeId===row.municipalScopeId&&point.vendor_id===row.vendor_id&&point.assigneeUid===row.delivery?.assigneeUid&&point.assignedAt===row.delivery?.assignedAt;
-  const position=matching?publicLocation(point):null;
   const status=row.delivery?.status||'unassigned';
+  // Retain the stored audit position without showing a driver marker after completion.
+  const position=matching&&status!=='delivered'?publicLocation(point):null;
   const age=position?Math.max(0,Date.parse(at)-Date.parse(position.capturedAt)):null;
   return {invoiceId:row.id,deliveryStatus:status,trackingState:status==='delivered'?'completed':status!=='in_transit'?'not_started':!position?'waiting':age>45000?'stale':'recent',location:position,serverTime:at,updateIntervalSeconds:10};
 }
