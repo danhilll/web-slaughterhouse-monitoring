@@ -3,6 +3,7 @@ import { createApiErrorHandler } from './api-errors.js';
 import { summarizeHeadcounts, summarizeAmounts, validDay } from '../shared/reporting.js';
 import { createScopedListRouter } from './scoped-lists.js';
 import { createScopedReads } from './scoped-reads.js';
+import { maskCompletedDeliveryLocation } from './completed-delivery-mask.js';
 import { loadProductionConfig, assertProductionProject } from './production-config.js';
 import cors from 'cors';
 import { existsSync } from 'node:fs';
@@ -599,10 +600,13 @@ const monthLabelForKey = (yearMonth) =>
   new Date(`${yearMonth}-01T00:00:00`).toLocaleString('en-US', { month: 'short' });
 
 const buildDashboard = async () => {
-  if (production) return scopedReads.dashboard({
-    today: manilaDateString(), month: manilaMonthKey(), municipality: MUNICIPALITY,
-    months: Array.from({length:6},(_,i)=>{const key=shiftMonthKey(manilaMonthKey(),i-5);return {key,next:shiftMonthKey(key,1),label:monthLabelForKey(key)};})
-  });
+  if (production) {
+    const report = await scopedReads.dashboard({
+      today: manilaDateString(), month: manilaMonthKey(), municipality: MUNICIPALITY,
+      months: Array.from({length:6},(_,i)=>{const key=shiftMonthKey(manilaMonthKey(),i-5);return {key,next:shiftMonthKey(key,1),label:monthLabelForKey(key)};})
+    });
+    return { ...report, recentInvoices: report.recentInvoices.map(maskCompletedDeliveryLocation) };
+  }
   const [vendorList, slaughterRecords, invoices, feeConfig] = await Promise.all([
     store.listVendors(),
     store.listRecords(),
@@ -621,7 +625,7 @@ const buildDashboard = async () => {
   const unpaidInvoicesCount = invoices.filter((inv) => inv.payment_status !== 'Paid').length;
 
   const recentSlaughterRecords = [...slaughterRecords].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10).map(join);
-  const recentInvoices = [...invoices].sort((a, b) => new Date(b.date_issued) - new Date(a.date_issued)).slice(0, 10).map((invoice) => ({
+  const recentInvoices = [...invoices].sort((a, b) => new Date(b.date_issued) - new Date(a.date_issued)).slice(0, 10).map((invoice) => maskCompletedDeliveryLocation({
     ...invoice,
     vendor_name: vendorList.find((v) => v.id === invoice.vendor_id)?.name || 'Unknown Vendor'
   }));
@@ -917,7 +921,7 @@ app.delete('/api/slaughter-records/:id', asyncHandler(async (req, res) => {
 
 app.get('/api/invoices', asyncHandler(async (req, res) => {
   const [vendorList, invoices] = await Promise.all([store.listVendors(), store.listInvoices()]);
-  const joined = invoices.map((invoice) => ({
+  const joined = invoices.map((invoice) => maskCompletedDeliveryLocation({
     ...invoice,
     vendor_name: vendorList.find((v) => v.id === invoice.vendor_id)?.name || 'Unknown Vendor'
   }));
@@ -930,7 +934,7 @@ app.get('/api/invoices/:id', asyncHandler(async (req, res) => {
   const invoice = await store.getInvoice(req.params.id);
   if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
   res.json({
-    ...invoice,
+    ...maskCompletedDeliveryLocation(invoice),
     municipality: MUNICIPALITY,
     vendor: typeof invoice.vendor_id === 'string' && invoice.vendor_id.length > 0 && !invoice.vendor_id.includes('/') ? await store.getVendor(invoice.vendor_id) : null
   });

@@ -133,7 +133,7 @@ test('invoice detail uses scoped point lookups without loading a vendor register
   const end=source.indexOf('// Due-date policy',begin);
   let handler,answer;const calls=[];
   runInNewContext(source.slice(begin,end),{
-    app:{get:(_path,fn)=>handler=fn},asyncHandler:fn=>fn,MUNICIPALITY:'Synthetic',
+    app:{get:(_path,fn)=>handler=fn},asyncHandler:fn=>fn,MUNICIPALITY:'Synthetic',maskCompletedDeliveryLocation:invoice=>invoice,
     store:{
       getInvoice:async id=>{calls.push(['invoice',id]);return {id,vendor_id:'VEN-A'};},
       getVendor:async id=>{calls.push(['vendor',id]);return {id,name:'Scoped vendor'};},

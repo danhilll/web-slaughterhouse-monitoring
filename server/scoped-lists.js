@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { maskCompletedDeliveryLocation } from './completed-delivery-mask.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const collections = { vendors:'vendors', 'slaughter-records':'slaughter_records', invoices:'invoices', notifications:'notifications' };
@@ -40,6 +41,7 @@ export function createScopedListRouter({ store, scope, cursorSecret, now=Date.no
       if (name==='invoices' || name==='slaughter_records') {
         const vendors=new Map(await Promise.all([...new Set(items.map(row=>row.vendor_id).filter(id))].map(async vendorId=>[vendorId,await store.get('vendors',vendorId)])));
         items=items.map(row=>({...row,vendor_name:vendors.get(row.vendor_id)?.name||'Unknown Vendor'}));
+        if (name==='invoices') items=items.map(maskCompletedDeliveryLocation);
       }
       res.json({items,nextCursor});
     } catch(error) {
