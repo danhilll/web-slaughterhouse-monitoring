@@ -578,3 +578,5 @@ button, input, select, textarea {
 .dark .workspace-content .text-slate-500, .dark .workspace-content .text-slate-400 { color: #cbd5e1; }
 .dark .workspace-content .text-red-700 { color: #fca5a5; }
 .workspace-content input[type=checkbox], .workspace-content input[type=radio] { min-height: auto; }
+/* Long internal references (AINV-…, business IDs, receipt numbers) wrap instead of widening phone layouts. */
+.workspace-content article, .workspace-content section { overflow-wrap: anywhere; }

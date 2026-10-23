@@ -12,6 +12,6 @@ test('calculated basis is labelled with its factor and never as scale-measured',
 
 test('measured basis keeps its scale label, time and revisions', () => {
   const text = carcassBasisText({ method: 'measured', liveWeightGrams: 100000, carcassWeightGrams: 81000, animalRevision: 1, weighedAt: '2026-10-20T01:00:00Z', measurementRevision: 2 });
-  assert.match(text, /^Scale-measured carcass weight: 81 kg · weighed 2026-10-20T01:00:00Z · measurement revision 2/);
+  assert.match(text, /^Scale-measured carcass weight: 81 kg · weighed 2026-10-20 09:00 \(Manila\) · measurement revision 2/);
   assert.doesNotMatch(text, /Calculated carcass weight/);
 });

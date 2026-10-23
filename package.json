@@ -21,6 +21,7 @@
     "test:lists-ui": "node --experimental-strip-types --test src/listPages.test.ts",
     "test:tracking-ui": "node --experimental-strip-types --test src/trackingPolling.test.ts",
     "test:carcass-ui": "node --experimental-strip-types --test src/carcassBasis.test.ts",
+    "test:monitoring-ui": "node --experimental-strip-types --test src/monitoringMetrics.test.ts src/displayTime.test.ts",
     "verify": "npm run typecheck && npm run check:server && npm run test:server && node scripts/seed-firestore.js --dry-run && npm run build",
     "test:rehearsal:safety": "node --test rehearsal/safety.test.mjs",
     "rehearsal:emulators": "node rehearsal/start-emulators.mjs",
