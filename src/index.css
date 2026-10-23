@@ -559,3 +559,22 @@ button, input, select, textarea {
     padding-right: 1.5rem;
   }
 }
+
+/* Monitoring surfaces: readable in both themes, without decorative motion. */
+.monitor-stack { display: grid; gap: 1.25rem; }
+.monitor-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,230px),1fr)); gap: 1rem; }
+.monitor-card { padding: 1.5rem; border: 1px solid #cbd5e1; border-radius: 1rem; background: #fff; color: #1e293b; display: grid; gap: .8rem; overflow-wrap: anywhere; }
+.monitor-card h2 { font-size: 1.125rem; font-weight: 700; }
+.monitor-card p { line-height: 1.6; }
+.metric-value { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dark .monitor-card { background: #292522; color: #f3ede9; border-color: #8b827b; }
+.workspace-content button, .workspace-content input, .workspace-content select, .sidebar-link { min-height: 48px; }
+.workspace-content :focus-visible { outline: 3px solid #c2410c; outline-offset: 3px; }
+.dark .workspace-content :focus-visible { outline-color: #f5b78b; }
+.sidebar-footer, .ambient-backdrop, .ledger-artwork { display: none; }
+@media (max-width: 640px) { .monitor-card { padding: 1rem; } .workspace-content { padding: 1rem; } }
+
+.workspace-content .text-slate-500 { color: #475569; }
+.dark .workspace-content .text-slate-500, .dark .workspace-content .text-slate-400 { color: #cbd5e1; }
+.dark .workspace-content .text-red-700 { color: #fca5a5; }
+.workspace-content input[type=checkbox], .workspace-content input[type=radio] { min-height: auto; }

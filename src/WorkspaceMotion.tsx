@@ -7,7 +7,7 @@ const MotionContext = createContext({ motionEnabled: false, systemReduced: false
 
 export function WorkspaceMotion({ children }: { children: ReactNode }) {
   const [paused, setPaused] = useState(() => {
-    try { return localStorage.getItem(MOTION_KEY) === 'paused'; } catch { return false; }
+    try { return localStorage.getItem(MOTION_KEY) !== 'enabled'; } catch { return true; }
   });
   const [systemReduced, setSystemReduced] = useState(() => window.matchMedia(reducedMotionQuery).matches);
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
