@@ -3,34 +3,38 @@ import assert from 'node:assert/strict';
 import {fixture} from './test-support/operations-fixture.js';
 
 // One chained, isolated run of the agreed pilot flow on shared synthetic state: real animals and operations routers.
-test('pilot flow: register → approve → measure → organ choice → PHP95 invoice → assign → unpaid dispatch → drop-off → tracking → completion → cash → oversight',async t=>{
+const scenarios=[
+  {species:'Pig',identifier:'PILOT-PIG-1',live:85001,scale:null,method:'calculated_80_percent',carcass:68001},
+  {species:'Cow',identifier:'PILOT-COW-1',live:150000,scale:119001,method:'measured',carcass:119001}];
+for(const sc of scenarios)test(`pilot flow (${sc.method}): register → approve → carcass basis → organ choice → PHP95 invoice → assign → unpaid dispatch → drop-off → tracking → completion → cash → oversight`,async t=>{
   const f=await fixture(t);
   const animals=async(path,who,body)=>{const r=await fetch(`${f.origin}/api/mobile/animals${path}`,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${who}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
   const hoursAgo=h=>new Date(Date.now()-h*3600000).toISOString();
   const dueDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 
   // 1. Registration to the validated owning Vendor; only inventory Staff may register.
-  const input={vendorBusinessId:'VEN-A',identifier:'PILOT-PIG-1',identifierType:'manual',species:'Pig',weightGrams:85001,weighedAt:hoursAgo(2)};
+  const input={vendorBusinessId:'VEN-A',identifier:sc.identifier,identifierType:'manual',species:sc.species,weightGrams:sc.live,weighedAt:hoursAgo(2)};
   assert.equal((await animals('/','billing',input)).status,403);
   assert.equal((await animals('/','inventory',{...input,vendorBusinessId:'VEN-MISSING'})).status>=400,true);
   const created=await animals('/','inventory',input);assert.equal(created.status,201);
   const animalId=created.body.id;assert.equal(created.body.vendorBusinessId,'VEN-A');
   const preview=()=>f.call(`/animals/${animalId}/invoice-preview`,'billing');
 
-  // 2–3. Unapproved and estimate-only animals cannot be priced; only the Inspector approves the current revision.
+  // 2–3. Unapproved animals cannot be priced; only the Inspector approves the current revision.
   assert.equal((await preview()).status,409);
   assert.equal((await animals(`/${animalId}/inspection`,'inventory',{decision:'approved',expectedRevision:1,notes:'Synthetic review'})).status,403);
   assert.equal((await animals(`/${animalId}/inspection`,'inspector',{decision:'approved',expectedRevision:1,notes:'Synthetic ownership and weight review'})).status,200);
-  assert.equal((await preview()).status,409,'an estimate is never accepted as the actual carcass weight');
-  assert.equal(created.body.carcassWeight,null);
 
-  // 3. Actual measured carcass weight by authorized inventory personnel.
-  assert.equal((await animals(`/${animalId}/carcass-weight`,'billing',{weightGrams:65001,weighedAt:hoursAgo(1),expectedRevision:1,expectedCarcassRevision:0})).status,403);
-  const measured=await animals(`/${animalId}/carcass-weight`,'inventory',{weightGrams:65001,weighedAt:hoursAgo(1),expectedRevision:1,expectedCarcassRevision:0});
-  assert.equal(measured.status,200);assert.equal(measured.body.carcassWeight.weightGrams,65001);assert.notEqual(measured.body.carcassWeight.weightGrams,measured.body.weightGrams);
+  // 3. Carcass basis: calculated (live weight x 0.8) by default; a scale reading, when recorded, is kept and distinct.
+  assert.equal(created.body.carcassWeight,null);assert.equal(created.body.carcassEstimate.weightGrams,Math.round(sc.live*0.8));
+  if(sc.scale){
+    assert.equal((await animals(`/${animalId}/carcass-weight`,'billing',{weightGrams:sc.scale,weighedAt:hoursAgo(1),expectedRevision:1,expectedCarcassRevision:0})).status,403);
+    const measured=await animals(`/${animalId}/carcass-weight`,'inventory',{weightGrams:sc.scale,weighedAt:hoursAgo(1),expectedRevision:1,expectedCarcassRevision:0});
+    assert.equal(measured.status,200);assert.equal(measured.body.carcassWeight.weightGrams,sc.scale);assert.equal(measured.body.carcassWeightSelection.source,'measured');
+  }
 
   // 5. PHP95 immutable-snapshot invoice for the owning Vendor; Billing only; duplicate protected.
-  const pv=await preview();assert.equal(pv.status,200);assert.equal(pv.body.totalCents,9500);assert.equal(pv.body.vendor.id,'VEN-A');
+  const pv=await preview();assert.equal(pv.status,200);assert.equal(pv.body.totalCents,9500);assert.deepEqual(Object.keys(pv.body).sort(),['animal','currency','feeSchedule','projection','totalCents','vendor'],'preview contract unchanged for deployed clients');assert.equal(pv.body.vendor.id,'VEN-A');
   assert.equal((await f.call(`/animals/${animalId}/invoice`,'inspector',{expectedRevision:1,feeScheduleVersion:1,dueDate})).status,403);
   assert.equal((await f.webCall(`/animals/${animalId}/invoice`,{expectedRevision:1,feeScheduleVersion:1,dueDate})).status,403);
   const issued=await f.call(`/animals/${animalId}/invoice`,'billing',{expectedRevision:1,feeScheduleVersion:1,dueDate});
@@ -38,6 +42,9 @@ test('pilot flow: register → approve → measure → organ choice → PHP95 in
   assert.match(id,/^AINV-[0-9a-f]{40}$/);assert.equal(issued.body.vendor_id,'VEN-A');assert.equal(issued.body.total_amount,95);assert.equal(issued.body.payment_status,'Unpaid');
   assert.deepEqual([issued.body.corral_fee,issued.body.delivery_fee,issued.body.anti_mortem_fee,issued.body.facility_fee],[15,25,10,45]);
   assert.equal(issued.body.due_date,dueDate);assert.equal(issued.body.feeScheduleSnapshot.version,1);
+  const basis=issued.body.carcassBasis;assert.equal(basis.method,sc.method);assert.equal(basis.liveWeightGrams,sc.live);assert.equal(basis.carcassWeightGrams,sc.carcass);assert.equal(basis.animalRevision,1);
+  if(sc.scale){assert.equal(basis.weighedAt!==undefined&&basis.measurementRevision===1,true);assert.equal(basis.factor,undefined);}
+  else{assert.equal(basis.factor,0.8);assert.equal(basis.rule,'manager_80_percent_v1');assert.equal(basis.rounding,'nearest_gram_half_up');assert.equal(basis.weighedAt,undefined);}
   assert.equal((await f.call(`/animals/${animalId}/invoice`,'billing',{expectedRevision:1,feeScheduleVersion:1,dueDate})).status,409);
 
   // 4 & 6. The owning Vendor must explicitly choose; unset blocks assignment and is never read as decline.
@@ -47,7 +54,7 @@ test('pilot flow: register → approve → measure → organ choice → PHP95 in
   assert.equal((await animals(`/${animalId}/organ-collection`,'inspector',{choice:'decline',expectedRevision:1,expectedChoiceRevision:0})).status,403);
   const chosen=await animals(`/${animalId}/organ-collection`,'alice',{choice:'decline',expectedRevision:1,expectedChoiceRevision:0});
   assert.equal(chosen.status,200);assert.equal(chosen.body.choice,'decline');
-  assert.equal(f.rows.get(`invoices/${id}`).total_amount,95,'organ choice never changes fees');
+  assert.equal(f.rows.get(`invoices/${id}`).total_amount,95,'organ choice never changes fees; both methods are PHP95 per animal');
 
   // 6. Inspector assigns active Delivery Staff against the verified owning-Vendor stall; payment is not a prerequisite.
   const options=await f.call(`/invoices/${id}/assignment-options`,'inspector');assert.equal(options.status,200);assert.equal(options.body.destination,'Synthetic Market / Meat / Stall A');
@@ -105,7 +112,7 @@ test('pilot flow: register → approve → measure → organ choice → PHP95 in
   const vendor=await f.call(`/invoices/${id}`,'alice'),web=await f.webCall(`/oversight/invoices/${id}`);
   assert.equal(vendor.body.payment_status,'Paid');assert.equal(vendor.body.payment.receiptReference,'OR-0001');
   assert.equal(web.body.invoice.balanceCents,0);assert.equal(web.body.invoice.payment.receiptReference,'OR-0001');assert.equal(web.body.invoice.id,id);
-  assert.equal(web.body.assignment.delivery.status,'delivered');assert.equal(web.body.animal.carcassWeight.weightGrams,65001);assert.equal(web.body.invoice.feeScheduleSnapshot.version,1);
+  assert.equal(web.body.assignment.delivery.status,'delivered');assert.equal(web.body.animal.carcassWeight?.weightGrams??null,sc.scale);assert.equal(web.body.animal.carcassEstimate.weightGrams,Math.round(sc.live*0.8));assert.deepEqual(web.body.invoice.carcassBasis,basis);assert.deepEqual(vendor.body.carcassBasis,basis);assert.equal(web.body.invoice.feeScheduleSnapshot.version,1);
   assert.equal((await f.call(`/invoices/${id}`,'bob')).status,404);
 
   // Audit trail and locks.
@@ -114,4 +121,5 @@ test('pilot flow: register → approve → measure → organ choice → PHP95 in
   assert.equal([...f.rows.keys()].filter(k=>k.startsWith('delivery_drop_off_audit/')).length,1);
   assert.equal([...f.rows.keys()].filter(k=>k.startsWith('organ_collection_audit/')).length,1);
   assert.equal(f.rows.get(`animal_records/${animalId}`).billingInvoiceId,id);
+  const issuedAudit=[...f.rows].find(([k,r])=>k.startsWith('operation_audit/')&&r.action==='invoice_issued')[1];assert.deepEqual(issuedAudit.after.carcassBasis,basis,'audit keeps the carcass-basis provenance');
 });

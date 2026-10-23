@@ -1,4 +1,4 @@
-import {requireMeasured} from './owner-workflow-policy.js';
+import {requireCarcassBasis} from './owner-workflow-policy.js';
 const fail = (status,message,extra={}) => Object.assign(new Error(message),{status,...extra});
 const intervalMs=10000;
 const same = (a,b) => ['latitude','longitude','accuracyMeters','capturedAt'].every(k=>a[k]===b[k]);
@@ -53,7 +53,7 @@ export function createTrackingStore(getDb,validInvoice) {
         if(legacy&&row.revision!==b.expectedRevision)throw fail(409,'Invoice changed. Refresh before submitting again.');
         const animalSnap=await tx.get(db().doc('animal_records/'+row.animalId)),animal=animalSnap.exists?animalSnap.data():null;
         if(!animal||animal.municipalScopeId!==row.municipalScopeId||animal.vendorBusinessId!==row.vendor_id||animal.revision!==row.animalRevision)throw fail(409,'Current measured shipment ownership requires review.');
-        requireMeasured(animal);
+        requireCarcassBasis(animal);
         const stored=await previous(tx,id,row);
         const old=stored&&stored.assigneeUid===d.assigneeUid&&stored.assignedAt===d.assignedAt?stored:null;
         if(old){

@@ -340,7 +340,8 @@ test('owner flow dispatches unpaid measured animal by Inspector and web oversigh
 });
 test('measurement/stall/current revision and same-day rules fail closed without writes',async t=>{
  const f=await fixture(t);const a=f.rows.get('animal_records/ANM-A'),original=structuredClone(a.carcassWeight);
- for(const c of [null,{...original,animalRevision:2},{...original,weightGrams:0}]){a.carcassWeight=c;assert.equal((await f.call('/animals/ANM-A/invoice-preview')).status,409);assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,409);}
+ a.carcassWeight=null;const calc=await f.call('/animals/ANM-A/invoice-preview');assert.equal(calc.status,200,'no scale measurement: the 80% calculation is the basis');
+ for(const c of [{...original,animalRevision:2},{...original,weightGrams:0}]){a.carcassWeight=c;assert.equal((await f.call('/animals/ANM-A/invoice-preview')).status,409);assert.equal((await f.call('/animals/ANM-A/invoice','billing',bill)).status,409);}
  a.carcassWeight=original;assert.equal((await f.call('/animals/ANM-A/invoice','billing',{...bill,dueDate:'2099-01-01'})).status,400);
  const inv=(await f.call('/animals/ANM-A/invoice','billing',bill)).body;const path='/invoices/'+inv.id;
  f.rows.get('vendors/VEN-A').stallNumber='UNRESERVED';assert.equal((await f.call(path+'/assignment-options','inspector')).status,409);f.rows.get('vendors/VEN-A').stallNumber='A';

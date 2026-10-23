@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from './api';
 import { manilaWeighingInput, manilaWeighingTimeToUtc, displayManilaWeighingTime } from './animalRegistrationTime';
-import { estimateCarcassWeight, selectCarcassWeight, type CarcassEstimate, type CarcassWeightSelection } from '../shared/carcassEstimate.js';
+import { estimateCarcassWeight, selectCarcassWeight, CALCULATED_CARCASS_LABEL, MEASURED_CARCASS_LABEL, type CarcassEstimate, type CarcassWeightSelection } from '../shared/carcassEstimate.js';
 import { carcassKilogramsToGrams, carcassGramsToKilograms } from './carcassWeight';
 
 type CarcassWeight = {weightGrams:number;weighedAt:string;revision:number;animalRevision:number;recordedAt:string;recordedBy:string};
@@ -19,9 +19,9 @@ function CarcassWeightForm({animal,busy,onSave}:{animal:Animal;busy:boolean;onSa
     try { await onSave({weightGrams:carcassKilogramsToGrams(weight),weighedAt:new Date(weighedAt).toISOString(),expectedRevision:animal.revision,expectedCarcassRevision:animal.carcassWeight?.revision??0,...(animal.carcassWeight?{reason}:{})}); }
     catch(e){setError((e as Error).message);}
   })();}}>
-    <fieldset disabled={busy}><legend className="font-semibold">{animal.carcassWeight?'Correct measured carcass weight':'Record measured carcass weight'}</legend>
-      <p className="my-2 text-sm text-amber-800 dark:text-amber-300">Enter the actual carcass-only scale reading, excluding organs/offal. This form does not capture offal quantities; never add them here. The estimate never fills this form. Owner local Pig/Cow definition: include head, skin/hide and feet. This is not a universal carcass standard. Never copy live weight into this measurement. Live weight and the PHP95 per-animal fee stay unchanged.</p>
-      <div className="grid gap-3 md:grid-cols-2"><label className="text-sm">Actual measured carcass weight (kg)<input className="input mt-1 w-full" required inputMode="decimal" value={weight} onChange={e=>setWeight(e.target.value)} placeholder="0.000"/></label>
+    <fieldset disabled={busy}><legend className="font-semibold">{animal.carcassWeight?'Correct scale-measured carcass weight (optional)':'Record scale-measured carcass weight (optional)'}</legend>
+      <p className="my-2 text-sm text-amber-800 dark:text-amber-300">A scale reading is optional: without one, invoicing and dispatch use the calculated carcass weight (80% of live weight). If you do record one, enter the actual carcass-only scale reading, excluding organs/offal. This form does not capture offal quantities; never add them here. The calculated weight never fills this form. Owner local Pig/Cow definition: include head, skin/hide and feet. This is not a universal carcass standard. Never copy live weight into this measurement. Live weight and the PHP95 per-animal fee stay unchanged.</p>
+      <div className="grid gap-3 md:grid-cols-2"><label className="text-sm">Scale-measured carcass weight (kg)<input className="input mt-1 w-full" required inputMode="decimal" value={weight} onChange={e=>setWeight(e.target.value)} placeholder="0.000"/></label>
       <label className="text-sm">Carcass weighed at<input className="input mt-1 w-full" required type="datetime-local" value={weighedAt} onChange={e=>setWeighedAt(e.target.value)}/></label></div>
       {animal.carcassWeight&&<label className="mt-3 block text-sm">Correction reason<textarea className="input mt-1 w-full" required maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/></label>}
       <button className="btn-secondary mt-3" type="submit">{busy?'Saving…':animal.carcassWeight?'Save carcass correction':'Save carcass weight'}</button>
@@ -32,11 +32,11 @@ export function CarcassWeightSummary({animal}:{animal:Animal}) {
   const estimate=animal.carcassEstimate??estimateCarcassWeight(animal.weightGrams,animal.revision);
   const selected=selectCarcassWeight(animal,estimate);
   return <div className="mt-1 text-sm text-slate-500">
-    <p>Estimated carcass: {carcassGramsToKilograms(estimate.weightGrams)} kg — 80% of live weight, nearest gram; animal revision {estimate.animalRevision}. Not measured.</p>
+    <p>{CALCULATED_CARCASS_LABEL}: {carcassGramsToKilograms(estimate.weightGrams)} kg — live weight × 0.8, nearest gram; animal revision {estimate.animalRevision}. Not scale-measured.</p>
     {animal.carcassWeight?<>
-      <p>Measured carcass: {carcassGramsToKilograms(animal.carcassWeight.weightGrams)} kg · Measured {new Date(animal.carcassWeight.weighedAt).toLocaleString()} · Measurement revision {animal.carcassWeight.revision} · Animal revision {animal.carcassWeight.animalRevision}.</p>
-      <p>Selected carcass weight: {carcassGramsToKilograms(selected.weightGrams)} kg (measured).{selected.requiresReview&&' Earlier animal revision; review and reinspection required before current-revision use.'}</p>
-    </>:<p>Selected carcass weight: {carcassGramsToKilograms(selected.weightGrams)} kg (estimated). No carcass measurement recorded.</p>}
+      <p>{MEASURED_CARCASS_LABEL}: {carcassGramsToKilograms(animal.carcassWeight.weightGrams)} kg · Measured {new Date(animal.carcassWeight.weighedAt).toLocaleString()} · Measurement revision {animal.carcassWeight.revision} · Animal revision {animal.carcassWeight.animalRevision}.</p>
+      <p>Selected carcass weight: {carcassGramsToKilograms(selected.weightGrams)} kg (scale-measured).{selected.requiresReview&&' Earlier animal revision; review and reinspection required before current-revision use.'}</p>
+    </>:<p>Selected carcass weight: {carcassGramsToKilograms(selected.weightGrams)} kg (calculated, 80% of live weight). No scale measurement recorded.</p>}
   </div>;
 }
 type OrganChoice={animalId:string;animalRevision:number;choice:'collect'|'decline'|null;choiceRevision:number;requiresReview:boolean;canChoose:boolean};

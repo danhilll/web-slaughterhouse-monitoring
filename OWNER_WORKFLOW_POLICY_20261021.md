@@ -1,3 +1,5 @@
+> **2026-10-24 update:** the mandatory actual measured carcass weight requirement in this document is superseded by `CALCULATED_CARCASS_POLICY_20261024.md` (calculated weight = live weight × 0.8; scale measurement optional). Fees and all other rules are unchanged.
+
 # Owner-confirmed fees, authority and municipal synchronization
 
 Isolated candidate based on deployed Web `bc8853695027f69a9e1cab2fef6769690217b55a`. This supersedes the fee/Billing-authority, assignment-authority, payment-before-dispatch and arbitrary-credit-date questions in the historical invoice/map readiness draft. The clarification below supersedes the remaining AINV-numbering question and fixes corrections/reversals as disabled; evidence limits and complete carcass-definition requirements remain. No production writes, deployment, signing, install, account/IAM changes or gate enablement occurred.

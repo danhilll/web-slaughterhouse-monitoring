@@ -7,3 +7,5 @@ export const CARCASS_ESTIMATE_ROUNDING: 'nearest_gram_half_up';
 export function estimateCarcassWeight(liveWeightGrams: number, animalRevision: number): CarcassEstimate;
 export function validCarcassEstimate(estimate: unknown, liveWeightGrams: number, animalRevision: number): boolean;
 export function selectCarcassWeight(animal: { revision: number; carcassWeight?: { weightGrams: number; animalRevision: number } | null }, estimate: CarcassEstimate): CarcassWeightSelection;
+export const CALCULATED_CARCASS_LABEL: string;
+export const MEASURED_CARCASS_LABEL: string;

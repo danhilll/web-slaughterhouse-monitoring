@@ -1,3 +1,5 @@
+> **2026-10-24 update:** the mandatory actual measured carcass weight requirement in this document is superseded by `CALCULATED_CARCASS_POLICY_20261024.md` (calculated weight = live weight × 0.8; scale measurement optional). Fees and all other rules are unchanged.
+
 # Carcass estimate and measured weight
 
 Local candidate based on `ba7c1aae1a24c397f8db7a4c939a48bbd8c409b2`.

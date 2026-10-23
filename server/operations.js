@@ -1,6 +1,6 @@
 import {dropOffReadable,dropOffProjection,validateDropOffPoint} from './drop-off-point.js';
 import {validCoordinates,validReviewedDestination,validateDestinationPin,pinMatches,destinationProjection,destinationReadable} from './destination-map.js';
-import {billingWriter,inspectorAssigner,requireMeasured,measuredCurrent,validateOwnerFees,stallDestination,stallReservationKey} from './owner-workflow-policy.js';
+import {billingWriter,inspectorAssigner,requireCarcassBasis,carcassBasis,validateOwnerFees,stallDestination,stallReservationKey} from './owner-workflow-policy.js';
 import { Router } from 'express';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FieldPath } from 'firebase-admin/firestore';
@@ -19,7 +19,7 @@ const municipalDate = at => {
 };
 const permission = (p, name) => p.role === 'admin' || p.role === 'staff' && p.staffPermissions.includes(name);
 const scopeRead = (row, p) => row?.municipalScopeId === p.municipalScopeId && (p.role !== 'vendor' || row.vendor_id === p.vendorBusinessId);
-const invoiceKeys = ['id','vendor_id','vendor_name','municipalScopeId','slaughter_record_id','date_issued','due_date','number_of_heads_cow','number_of_heads_pig','corral_fee','delivery_fee','anti_mortem_fee','facility_fee','total_amount','payment_status','animalId','animalRevision','animalIdentifier','revision','feeScheduleVersion','syntheticOnly','payment','delivery'];
+const invoiceKeys = ['id','vendor_id','vendor_name','municipalScopeId','slaughter_record_id','date_issued','due_date','number_of_heads_cow','number_of_heads_pig','corral_fee','delivery_fee','anti_mortem_fee','facility_fee','total_amount','payment_status','animalId','animalRevision','animalIdentifier','revision','feeScheduleVersion','syntheticOnly','carcassBasis','payment','delivery'];
 // Audit snapshots retain the stored legacy coordinate; responses hide it once delivery is completed.
 export const operationInvoiceView = (row, retainLocation = false) => {
   const pick=(source,keys)=>Object.fromEntries(keys.filter(key=>source[key]!==undefined).map(key=>[key,source[key]]));
@@ -69,7 +69,7 @@ export function createOperationsStore(getDb, { production = false } = {}) {
     const a=await read(tx,db().doc(`animal_records/${animalId}`));
     if(!a||a.municipalScopeId!==p.municipalScopeId)throw fail(404,'Animal record not found.');
     if(!Number.isSafeInteger(a.revision)||a.revision<1||!text(a.identifier,80)||a.inspection?.status!=='approved'||a.inspection.revision!==a.revision||!id(a.vendorBusinessId)||!['Cow','Pig'].includes(a.species)||!Number.isSafeInteger(a.weightGrams)||a.weightGrams<=0)throw fail(409,'Refresh and review the approved animal revision.');
-    requireMeasured(a);
+    const basis=requireCarcassBasis(a);
     const existing=await read(tx,invoice(invoiceId));
     if(existing||a.billingInvoiceId||a.deliveryId)throw fail(409,'This animal already has an invoice. Refresh invoice history.');
     const vendor=await read(tx,db().doc(`vendors/${a.vendorBusinessId}`));
@@ -77,14 +77,14 @@ export function createOperationsStore(getDb, { production = false } = {}) {
     const feeSnap=await tx.get(db().doc(`operation_fee_schedules/${p.municipalScopeId}`));
     const fees=scheduleView(feeSnap.exists?feeSnap.data():null,production);
     const totalCents=fees.corralCents+fees.deliveryCents+fees.inspectionCents+fees.facilityCents;
-    return {a,vendor,fees,totalCents,invoiceId};
+    return {a,vendor,fees,totalCents,invoiceId,basis};
   };
   const assignmentInputs = async (tx,row,p) => {
     const animal=await read(tx,db().doc(`animal_records/${row.animalId}`));
     if(!animal||animal.municipalScopeId!==p.municipalScopeId||animal.vendorBusinessId!==row.vendor_id||animal.revision!==row.animalRevision)throw fail(409,'Refresh the invoiced animal ownership/revision.');
     const organChoice=await read(tx,db().doc(`animal_organ_choices/${animal.id}`));
     if(!organChoice||!['collect','decline'].includes(organChoice.choice)||organChoice.municipalScopeId!==p.municipalScopeId||organChoice.vendorBusinessId!==animal.vendorBusinessId||organChoice.animalRevision!==animal.revision)throw fail(409,'The owning Vendor must explicitly choose collect or decline organs/offal for this animal revision before assignment.');
-    requireMeasured(animal);
+    requireCarcassBasis(animal);
     const vendor=await read(tx,db().doc(`vendors/${row.vendor_id}`));
     if(!vendor||vendor.status!=='Active'||vendor.municipalScopeId!==p.municipalScopeId||!text(vendor.name,200))throw fail(409,'Active vendor ownership requires review.');
     const destination=stallDestination(vendor),reservation=await read(tx,db().doc(`market_stall_assignments/${stallReservationKey(vendor)}`));
@@ -166,10 +166,10 @@ export function createOperationsStore(getDb, { production = false } = {}) {
       if(!billingWriter(p))throw fail(403,'Only Billing Staff may issue invoices.');
       if(b.dueDate!==municipalDate(at))throw fail(400,'Payment is due on the Manila issue date.');
       return db().runTransaction(async tx=>{
-        const {a,vendor,fees,totalCents,invoiceId}=await invoiceInputs(tx,animalId,p);
+        const {a,vendor,fees,totalCents,invoiceId,basis}=await invoiceInputs(tx,animalId,p);
         if(a.revision!==b.expectedRevision)throw fail(409,'Refresh and review the approved animal revision.');
         if(fees.version!==b.feeScheduleVersion)throw fail(409,'The fee schedule changed. Refresh before issuing an invoice.');
-        const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:municipalDate(at),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,feeScheduleSnapshot:fees,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
+        const row={id:invoiceId,workflow:'animal',vendor_id:vendor.id,vendor_name:vendor.name.trim(),municipalScopeId:p.municipalScopeId,slaughter_record_id:null,date_issued:municipalDate(at),due_date:b.dueDate,number_of_heads_cow:a.species==='Cow'?1:0,number_of_heads_pig:a.species==='Pig'?1:0,corral_fee:fees.corralCents/100,delivery_fee:fees.deliveryCents/100,anti_mortem_fee:fees.inspectionCents/100,facility_fee:fees.facilityCents/100,total_amount:totalCents/100,totalCents,payment_status:'Unpaid',animalId,animalRevision:a.revision,animalIdentifier:a.identifier,revision:1,feeScheduleVersion:fees.version,feeScheduleSnapshot:fees,carcassBasis:basis,syntheticOnly:fees.syntheticOnly===true,createdAt:at,createdBy:p.uid};
         tx.create(invoice(invoiceId),row);
         tx.update(db().doc(`animal_records/${animalId}`),{billingInvoiceId:invoiceId,updatedAt:at,updatedBy:p.uid});
         audited(tx,p,row,'invoice_issued',at); return row;
@@ -213,7 +213,7 @@ export function createOperationsStore(getDb, { production = false } = {}) {
           if(!d||p.role!=='staff'||d.assigneeUid!==p.uid||!p.staffPermissions.includes('delivery'))throw fail(403,'Only the assigned delivery staff can update this delivery.');
           const animal=await read(tx,db().doc(`animal_records/${before.animalId}`));
           if(!animal||animal.municipalScopeId!==p.municipalScopeId||animal.vendorBusinessId!==before.vendor_id||animal.revision!==before.animalRevision)throw fail(409,'Shipment ownership/revision requires review.');
-          requireMeasured(animal);
+          requireCarcassBasis(animal);
           {
             const next={assigned:'in_transit',in_transit:'delivered'}[d.status];
             if(!next||b.status!==next)throw fail(409,'Delivery status changed. Refresh before continuing.');
@@ -279,7 +279,7 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
     const rows=await animalStore.list(p,query(req,'eligible'));
     if(!Array.isArray(rows)||rows.length>26||rows.some(a=>a.municipalScopeId!==p.municipalScopeId||!id(a.id)||!id(a.vendorBusinessId)||!Number.isSafeInteger(a.revision)||a.revision<1))throw fail(503,'Animal records require review.');
     // Page the register first, then filter; an empty page may still have a continuation.
-    const page=rows.slice(0,25);const items=page.filter(a=>a.inspection?.status==='approved'&&a.inspection.revision===a.revision&&measuredCurrent(a)&&!a.billingInvoiceId&&!a.deliveryId).map(a=>({id:a.id,vendorBusinessId:a.vendorBusinessId,municipalScopeId:a.municipalScopeId,identifier:a.identifier,species:a.species,weightGrams:a.weightGrams,revision:a.revision}));
+    const page=rows.slice(0,25);const items=page.filter(a=>a.inspection?.status==='approved'&&a.inspection.revision===a.revision&&carcassBasis(a)!==null&&!a.billingInvoiceId&&!a.deliveryId).map(a=>({id:a.id,vendorBusinessId:a.vendorBusinessId,municipalScopeId:a.municipalScopeId,identifier:a.identifier,species:a.species,weightGrams:a.weightGrams,revision:a.revision}));
     res.json({items,nextCursor:rows.length>25?encode(p,page.at(-1).id,'eligible'):null});
   }));
   router.get('/billing/invoices',run(async(req,res)=>{

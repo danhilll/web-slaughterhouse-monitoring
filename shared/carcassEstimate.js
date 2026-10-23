@@ -1,6 +1,8 @@
 // Manager-confirmed rule for Cow and Pig. Never represents a scale measurement.
 export const CARCASS_ESTIMATE_RULE = 'manager_80_percent_v1';
 export const CARCASS_ESTIMATE_ROUNDING = 'nearest_gram_half_up';
+export const CALCULATED_CARCASS_LABEL = 'Calculated carcass weight (80% of live weight)';
+export const MEASURED_CARCASS_LABEL = 'Scale-measured carcass weight';
 export function estimateCarcassWeight(liveWeightGrams, animalRevision) {
   if (!Number.isSafeInteger(liveWeightGrams) || liveWeightGrams <= 0 ||
       !Number.isSafeInteger(animalRevision) || animalRevision <= 0) {
