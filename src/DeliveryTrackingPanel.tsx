@@ -36,13 +36,16 @@ export function DeliveryTrackingPanel({ invoiceId, onClose, deliveryCompleted = 
   const position = completed ? null : current?.location;
   const verifiedDestination=destination?.invoiceId===invoiceId?destination.destination:null;
   const savedDropOff=dropOff?.invoiceId===invoiceId?dropOff.point:null;
+  // An open map gets its own full-width card so it is not squeezed into the text column.
+  const mapOpen = showMap && visible && Boolean(position || verifiedDestination || savedDropOff);
   const age = position && current ? Math.max(0, Math.floor((Date.parse(current.serverTime) - Date.parse(position.capturedAt) + clock - receivedAt) / 1000)) : null;
   return <section className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
     <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">Delivery tracking</h4><button className="btn-secondary" onClick={onClose}>Close tracking</button></div>
+    <div className={`tracking-layout${mapOpen?' has-map':''}`}><div className="tracking-info">
     <p role="status" className="mt-3 font-medium">{completed ? 'Delivery completed' : trackingLabel(current, error, age)}</p>
     <p role="status">{destinationLoading?'Loading verified destination…':verifiedDestination?`Verified destination · confirmed ${verifiedDestination.verifiedAt}`:destinationError?'Destination pin availability unconfirmed.':'Text-only destination: no verified coordinate pin available.'}</p><button className="btn-secondary" onClick={()=>setDestinationRefresh(v=>v+1)}>Refresh destination pin</button>{destinationError&&<p role="alert">{destinationError} Shared-position tracking is independent.</p>}
     <h5 className="font-semibold">{DROP_OFF_LABEL}</h5><p>{DROP_OFF_EXPLANATION}</p><p role="status">{dropOffLoading?'Loading optional drop-off point…':savedDropOff?`Saved ${savedDropOff.selectedAt} · ${savedDropOff.latitude}, ${savedDropOff.longitude}`:dropOffError?'Drop-off pin availability unconfirmed.':'No optional drop-off point selected. Delivery may proceed without it.'}</p><button className="btn-secondary" onClick={()=>setDropOffRefresh(v=>v+1)}>Refresh drop-off point</button>{dropOffError&&<p role="alert">{dropOffError}</p>}
-    {(position||verifiedDestination||savedDropOff)&&<><button className="btn-secondary mt-3" onClick={()=>setShowMap(!showMap)}>{showMap?'Hide map':'Show map'}</button><p className="text-xs">Map key: green car = Delivery Staff (last shared GPS) · red pin = Market destination · blue pin = Drop-off point · dashed line = straight-line direction, not a road route. No automatic live-device preview.</p>{showMap&&visible&&<DeliveryMap position={position} destination={verifiedDestination} dropOff={savedDropOff}/>}</>}
+    {(position||verifiedDestination||savedDropOff)&&<><button className="btn-secondary mt-3" onClick={()=>setShowMap(!showMap)}>{showMap?'Hide map':'Show map'}</button><p className="text-xs">Map key: green car = Delivery Staff (last shared GPS) · red pin = Market destination · blue pin = Drop-off point · dashed line = straight-line direction, not a road route. No automatic live-device preview.</p></>}
     {position && <>
       <p className="mt-1 text-xs">The car marker is the last shared position, not this device’s current position. Opening the map requests this area from OpenStreetMap. Account and invoice details are not sent.</p>
       <p className="mt-2">Last shared delivery position: {position.latitude}, {position.longitude}</p>
@@ -51,5 +54,6 @@ export function DeliveryTrackingPanel({ invoiceId, onClose, deliveryCompleted = 
     </>}
     {error && !completed && <p role="alert" className="mt-3 text-sm text-red-700">{error} Any position shown is the last received location.</p>}
     <p className="mt-3 text-xs text-slate-500">{completed ? 'Tracking ended. Saved destination and drop-off pins remain available; historical positions are not shown as current.' : 'Refreshes every 10 seconds while visible. The phone shares periodic positions while its tracking screen is open. This is not continuous or screen-off tracking, or proof of arrival.'}</p>
+    </div>{mapOpen&&<div className="tracking-map"><DeliveryMap position={position} destination={verifiedDestination} dropOff={savedDropOff}/></div>}</div>
   </section>;
 }

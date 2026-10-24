@@ -12,7 +12,8 @@ class Boundary extends Component<{children:ReactNode},{failed:boolean}> {
 }
 function Updates({point,destination,dropOff,onFailure}:{point:MapPoint|null;destination:DestinationPoint|null;dropOff:DestinationPoint|null;onFailure:()=>void}) {
  const {map}=useMap();
- useEffect(()=>{if(!map)return;const all=[point,destination,dropOff].filter((p):p is DestinationPoint=>p!==null);if(all.length>1)map.fitBounds([[Math.min(...all.map(p=>p.longitude)),Math.min(...all.map(p=>p.latitude))],[Math.max(...all.map(p=>p.longitude)),Math.max(...all.map(p=>p.latitude))]],{padding:50,maxZoom:16,duration:0});else if(all[0])map.jumpTo({center:[all[0].longitude,all[0].latitude]});},[map,point?.latitude,point?.longitude,destination?.latitude,destination?.longitude,dropOff?.latitude,dropOff?.longitude]);
+ // Refit on marker changes and whenever the map box resizes, so every marker stays in view at any width.
+ useEffect(()=>{if(!map)return;const fit=()=>{const all=[point,destination,dropOff].filter((p):p is DestinationPoint=>p!==null);if(all.length>1)map.fitBounds([[Math.min(...all.map(p=>p.longitude)),Math.min(...all.map(p=>p.latitude))],[Math.max(...all.map(p=>p.longitude)),Math.max(...all.map(p=>p.latitude))]],{padding:50,maxZoom:16,duration:0});else if(all[0])map.jumpTo({center:[all[0].longitude,all[0].latitude]});};fit();map.on('resize',fit);return()=>{map.off('resize',fit);};},[map,point?.latitude,point?.longitude,destination?.latitude,destination?.longitude,dropOff?.latitude,dropOff?.longitude]);
  useEffect(()=>{if(!map)return; map.on('error',onFailure); return ()=>{map.off('error',onFailure);};},[map,onFailure]);
  return null;
 }

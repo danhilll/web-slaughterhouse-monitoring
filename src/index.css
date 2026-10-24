@@ -662,3 +662,11 @@ button, input, select, textarea {
 .dash-pill.is-warning { color:#8a4b00; background:color-mix(in srgb,#fab219 22%,var(--d-surface)); }
 .dark .dash-pill.is-warning { color:#fab219; }
 .dash-mini-stats small { font-size:.72rem; color:var(--d-muted); }
+
+/* Delivery tracking: an open map gets its own full-width card above the details, instead of sharing the text column. */
+.tracking-layout { display:grid; gap:1.25rem; margin-top:.75rem; }
+.tracking-info { min-width:0; }
+.tracking-map { order:-1; min-width:0; border:1px solid var(--line); border-radius:.9rem; padding:.5rem; background:var(--surface); }
+.delivery-map-frame { display:block; height:clamp(460px,66vh,720px); }
+/* On phones the map spans the delivery card's padding too (tracking panel 1rem + card 1.25rem). */
+@media (max-width:640px) { .tracking-map { margin-inline:-2.25rem; border-radius:0; border-inline:0; padding:.25rem 0; } .delivery-map-frame { height:600px; border-radius:0; } }
