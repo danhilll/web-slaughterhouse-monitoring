@@ -13,7 +13,7 @@ export const faq = [
  ['What do Paid and Unpaid mean?', 'Paid means full payment was recorded. Unpaid means payment remains outstanding. Dispatch does not require payment.'],
  ['Is AINV an official receipt?', 'No. AINV is an internal bill reference. Keep the paper official receipt.'],
  ['When does tracking run?', 'Only while the delivery screen is visible. Leaving stops tracking. Background tracking is unavailable.'],
- ['What are the three map markers?', 'Inspector destination: the verified stall. Delivery drop-off: an optional fixed point. Shared GPS: the last driver position. Completion hides the driver marker and keeps fixed pins. Completed drop-off editing stays closed.'],
+ ['What are the three map markers?', 'Red pin: Market destination, the Inspector-verified stall. Blue pin: Drop-off point, an optional fixed point chosen by Delivery Staff. Green car: Delivery Staff, the last shared GPS position. Completion hides the car and keeps both pins. Completed drop-off editing stays closed.'],
  ['Which weight is used?', 'Pig/Cow calculated carcass weight is live weight × 0.8. An optional current scale measurement takes precedence. Invoice weight is the stored issue-time basis, not the current animal calculation. Missing invoice snapshots stay unavailable.'],
  ['What are the fees?', '₱95 per animal: corral ₱15, delivery ₱25, inspection ₱10, facility ₱45.'],
  ['Who can help?', 'Contact your authorized administrator for access, records or receipt discrepancies.']
