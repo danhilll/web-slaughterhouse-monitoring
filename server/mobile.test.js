@@ -274,3 +274,18 @@ test('a weight basis whose revision disagrees with the invoice is omitted', asyn
   const row = (await request('/api/mobile/invoices?limit=2')).body.items[0];
   assert.equal(row.carcassBasis, undefined); assert.equal(row.animalRevision, undefined);
 });
+
+test('weight basis produced by the real invoice policy passes through the vendor view unchanged', async t => {
+  const { carcassBasis } = await import('./owner-workflow-policy.js');
+  const { estimateCarcassWeight } = await import('../shared/carcassEstimate.js');
+  const base = { revision: 2, species: 'Pig', weightGrams: 100000, inspection: { status: 'approved', revision: 2 } };
+  const calculated = carcassBasis({ ...base, carcassEstimate: estimateCarcassWeight(100000, 2) });
+  const measured = carcassBasis({ ...base, carcassWeight: { weightGrams: 79500, animalRevision: 2, revision: 1, weighedAt: '2026-10-01T01:00:00.000Z', recordedAt: '2026-10-01T01:05:00.000Z', recordedBy: 'SYNTHETIC-INVENTORY' } });
+  assert.equal(calculated.method, 'calculated_80_percent'); assert.equal(measured.method, 'measured');
+  const { request } = await fixture(t, state => {
+    Object.assign(state.invoices[0], { carcassBasis: calculated, animalRevision: 2 });
+    Object.assign(state.invoices[1], { carcassBasis: measured, animalRevision: 2 });
+  });
+  const rows = (await request('/api/mobile/invoices?limit=2')).body.items;
+  assert.deepEqual(rows[0].carcassBasis, calculated); assert.deepEqual(rows[1].carcassBasis, measured);
+});
