@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chartBuckets, previousSpan, kpis, change, animalSeries, moneySeries, feeBreakdown, topVendors, pipeline, recentInvoices} from './dashboardData.ts';
 // Wednesday 2026-10-21 10:00 in Manila.
 const now = new Date('2026-10-21T02:00:00Z');
-const inv = (id: string, day: string, pesos: number, extra: Record<string,unknown> = {}) => ({id, date_issued: day, total_amount: pesos, payment_status: 'Unpaid', corral_fee: 15, delivery_fee: 25, anti_mortem_fee: 10, facility_fee: 45, vendor_id: 'V1', vendor_name: 'Vendor One', ...extra});
+const inv = (id: string, day: string, pesos: number, extra: Record<string,unknown> = {}) => ({id, date_issued: day, due_date: day, total_amount: pesos, payment_status: 'Unpaid', corral_fee: 15, delivery_fee: 25, anti_mortem_fee: 10, facility_fee: 45, vendor_id: 'V1', vendor_name: 'Vendor One', ...extra});
 
 test('buckets: Today shows 14 context days; week is Monday to Sunday with future days marked; year has 12 months', () => {
   const day = chartBuckets('day', now); assert.equal(day.length, 14); assert.equal(day.at(-1)!.key, '2026-10-21'); assert.equal(day.some(b => b.future), false);
@@ -42,6 +42,6 @@ test('fee breakdown, top vendors, pipeline and recent invoices', () => {
   const fees = feeBreakdown(rows, ['2026-10-01','2026-11-01']);
   assert.deepEqual(fees.parts.map(p => p.amount), [30,50,20,90]); assert.equal(fees.total, 190); assert.equal(Math.round(fees.parts[3].share*100), 47);
   assert.deepEqual(topVendors(rows, ['2026-10-01','2026-11-01'], 1).rows, [{name:'Vendor One',amount:95,invoices:1},{name:'Other (1)',amount:95,invoices:1}]);
-  assert.deepEqual(pipeline(rows), {counts:{awaiting:1,assigned:0,in_transit:1,delivered:1,unknown:0},outstanding:190,unpaid:2});
+  assert.deepEqual(pipeline(rows, now), {counts:{awaiting:1,assigned:0,in_transit:1,delivered:1,unknown:0},outstanding:190,unpaid:2,overdue:1,overdueAmount:95});
   assert.deepEqual(recentInvoices(rows).map(r => r.id), ['B','A','C']);
 });

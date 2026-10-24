@@ -32,3 +32,11 @@ export function parseMapMarkers(value:unknown):MapMarkers|null{
  const position=v.position===null?null:parseMapPoint(v.position),destination=v.destination===null?null:parseDestinationPoint(v.destination);
  if(v.position!==null&&!position||v.destination!==null&&!destination)return null;const dropOff=v.dropOff===undefined||v.dropOff===null?null:parseDestinationPoint(v.dropOff);if(v.dropOff!==undefined&&v.dropOff!==null&&!dropOff)return null;return keys==='destination,position'?{position,destination}:{position,destination,dropOff};
 }
+
+/** Great-circle distance in metres (display only; not a road route). */
+export function straightLineMeters(a:{latitude:number;longitude:number},b:{latitude:number;longitude:number}){
+ const r=Math.PI/180,dLat=(b.latitude-a.latitude)*r,dLon=(b.longitude-a.longitude)*r;
+ const h=Math.sin(dLat/2)**2+Math.cos(a.latitude*r)*Math.cos(b.latitude*r)*Math.sin(dLon/2)**2;
+ return 2*6371008.8*Math.asin(Math.min(1,Math.sqrt(h)));
+}
+export const distanceText=(m:number)=>m<1000?`${Math.round(m/10)*10} m`:`${(m/1000).toFixed(m<10000?1:0)} km`;

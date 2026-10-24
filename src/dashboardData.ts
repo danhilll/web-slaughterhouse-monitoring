@@ -1,8 +1,9 @@
 import {manilaDay, periodBounds, validDay, metric, type Period, type MetricRow} from './monitoringMetrics.ts';
+import {paymentState} from './overdue.ts';
 // Pure aggregation for the read-only Dashboard. Days are Asia/Manila calendar days.
 // A record with an unreadable date or amount is never counted as zero: it is excluded and counted.
 export type AnimalRow = MetricRow & {species?: string; vendorBusinessId?: string};
-export type InvoiceRow = MetricRow & {vendor_name?: string; vendor_id?: string; corral_fee?: number; delivery_fee?: number; anti_mortem_fee?: number; facility_fee?: number; number_of_heads_cow?: number; number_of_heads_pig?: number; delivery?: {status?: string; deliveredAt?: string}};
+export type InvoiceRow = MetricRow & {due_date?: string; vendor_name?: string; vendor_id?: string; corral_fee?: number; delivery_fee?: number; anti_mortem_fee?: number; facility_fee?: number; number_of_heads_cow?: number; number_of_heads_pig?: number; delivery?: {status?: string; deliveredAt?: string}};
 export type Bucket = {key: string; label: string; start: string; end: string; future: boolean};
 
 const addDays = (day: string, n: number) => { const d = new Date(day+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
@@ -110,15 +111,16 @@ export function topVendors(rows: InvoiceRow[], bounds: [string,string], limit = 
 }
 
 /** Current state of every invoice, independent of the selected period. */
-export function pipeline(rows: InvoiceRow[]) {
+export function pipeline(rows: InvoiceRow[], now = new Date()) {
   const counts = {awaiting: 0, assigned: 0, in_transit: 0, delivered: 0, unknown: 0};
-  let outstanding = 0, unpaid = 0, unreadable = 0;
+  let outstanding = 0, unpaid = 0, unreadable = 0, overdue = 0, overdueAmount = 0;
   for (const row of rows) {
     const s = row.delivery?.status;
     if (!row.delivery) counts.awaiting++; else if (s === 'assigned' || s === 'in_transit' || s === 'delivered') counts[s]++; else counts.unknown++;
-    if (row.payment_status === 'Unpaid') { const a = cents(row.total_amount); if (a === null) unreadable++; else { outstanding += a; unpaid++; } }
+    const state = paymentState(row, now);
+    if (state === 'Unpaid' || state === 'Overdue') { const a = cents(row.total_amount); if (a === null) unreadable++; else { outstanding += a; unpaid++; if (state === 'Overdue') { overdue++; overdueAmount += a; } } }
   }
-  return {counts, outstanding: unreadable ? null : outstanding/100, unpaid};
+  return {counts, outstanding: unreadable ? null : outstanding/100, unpaid, overdue, overdueAmount: unreadable ? null : overdueAmount/100};
 }
 
 export function recentInvoices(rows: InvoiceRow[], limit = 8) {

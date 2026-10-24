@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseMapPoint,tileRequest} from './position.ts';
+import {parseMapPoint,tileRequest,straightLineMeters,distanceText} from './position.ts';
 test('numeric position only; no identity fields cross renderer boundary',()=>{
  const p={latitude:14.123,longitude:121.123,accuracyMeters:25};
  assert.deepEqual(parseMapPoint(p),p);
@@ -28,4 +28,10 @@ test('drop-off is an independent optional numeric marker; legacy frames and iden
  const dropOff={latitude:5.25,longitude:6.5},destination={latitude:1.25,longitude:2.5},position={latitude:3.25,longitude:4.5,accuracyMeters:12};
  for(const v of [{position,destination,dropOff},{position:null,destination:null,dropOff},{position:null,destination,dropOff:null}])assert.deepEqual(parseMapMarkers(v),v);
  for(const dropOff of [{latitude:91,longitude:2},{latitude:'1',longitude:2},{latitude:1,longitude:2,source:'device'},{latitude:1,longitude:2,token:'x'}])assert.equal(parseMapMarkers({position:null,destination:null,dropOff}),null);
+});
+
+test('straight-line distance and its text', () => {
+ assert.equal(Math.round(straightLineMeters({latitude:0,longitude:0},{latitude:0,longitude:1})/1000), 111);
+ assert.equal(straightLineMeters({latitude:14.6,longitude:121},{latitude:14.6,longitude:121}), 0);
+ assert.equal(distanceText(437), '440 m'); assert.equal(distanceText(1234), '1.2 km'); assert.equal(distanceText(23456), '23 km');
 });

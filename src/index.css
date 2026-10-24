@@ -659,3 +659,6 @@ button, input, select, textarea {
 @media (max-width: 640px) { .dash-card { padding:1rem; } .dash-pipeline { grid-template-columns:repeat(2,minmax(0,1fr)); } .dash-segment { display:grid; grid-template-columns:1fr 1fr; width:100%; } .dash-toolbar-end { margin-left:0; } .dash-table { min-width:640px; } }
 .dash-card table, .dash-card th, .dash-card td { color:var(--d-ink); }
 .dash-card th { color:var(--d-muted); }
+.dash-pill.is-warning { color:#8a4b00; background:color-mix(in srgb,#fab219 22%,var(--d-surface)); }
+.dark .dash-pill.is-warning { color:#fab219; }
+.dash-mini-stats small { font-size:.72rem; color:var(--d-muted); }

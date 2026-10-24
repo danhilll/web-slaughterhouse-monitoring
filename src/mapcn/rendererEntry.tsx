@@ -2,7 +2,7 @@ import { Component, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Map, MapMarker, MarkerContent, MapGeoJSON, useMap } from './map';
 import type { StyleSpecification } from 'maplibre-gl';
-import {parseMapMarkers, tileRequest, type MapPoint, type DestinationPoint,type MapMarkers} from './position';
+import {parseMapMarkers, tileRequest, straightLineMeters, distanceText, type MapPoint, type DestinationPoint,type MapMarkers} from './position';
 import {CarGlyph,PinGlyph,MARKER_COLORS,MARKER_LABELS} from './markerGlyphs';
 import './renderer.css';
 const style: StyleSpecification = {version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,maxzoom:19,attribution:'© OpenStreetMap contributors'}},layers:[{id:'osm',type:'raster',source:'osm'}]};
@@ -24,8 +24,11 @@ function accuracyArea(p:MapPoint):GeoJSON.Feature<GeoJSON.Polygon> {
  return [x*180/Math.PI,y*180/Math.PI];});
  return {type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[ring]}};
 }
+// Direction only: a straight line from the last shared position to where the delivery is headed. Not a road route;
+// no routing service is called, so no coordinates leave this page beyond the existing map tiles.
+function directionLine(from:MapPoint,to:DestinationPoint):GeoJSON.Feature<GeoJSON.LineString>{return {type:'Feature',properties:{},geometry:{type:'LineString',coordinates:[[from.longitude,from.latitude],[to.longitude,to.latitude]]}};}
 function Renderer(){
- const [markers,setMarkers]=useState<MapMarkers>({position:null,destination:null}),[failed,setFailed]=useState(false);const point=markers.position,destination=markers.destination,dropOff=markers.dropOff??null,center=point??destination??dropOff;
+ const [markers,setMarkers]=useState<MapMarkers>({position:null,destination:null}),[failed,setFailed]=useState(false);const point=markers.position,destination=markers.destination,dropOff=markers.dropOff??null,center=point??destination??dropOff;const target=destination??dropOff,targetLabel=destination?MARKER_LABELS.destination:MARKER_LABELS.dropOff,distance=point&&target?straightLineMeters(point,target):null;
  useEffect(()=>{const receive=(event:MessageEvent)=>{if(event.source!==window.parent||event.origin!==window.location.origin)return;setMarkers(parseMapMarkers(event.data)??{position:null,destination:null});setFailed(false);};
  const hide=()=>{if(document.hidden)setMarkers({position:null,destination:null});};
  window.addEventListener('message',receive);document.addEventListener('visibilitychange',hide);
@@ -33,10 +36,10 @@ function Renderer(){
  return()=>{window.removeEventListener('message',receive);document.removeEventListener('visibilitychange',hide);};},[]);
  return <main>{center?<><Boundary><div className="mapcn-host"><Map theme="light" styles={{light:style,dark:style}} center={[center.longitude,center.latitude]} zoom={16} maxZoom={19}
  attributionControl={false} transformRequest={tileRequest} renderWorldCopies={false} cancelPendingTileRequestsWhileZooming={true} fadeDuration={0}>
- {point&&point.accuracyMeters>0&&point.accuracyMeters<20000000&&<MapGeoJSON data={accuracyArea(point)} fillPaint={{'fill-color':'#166534','fill-opacity':0.1}} linePaint={{'line-color':'#166534','line-width':1}}/>}<Updates point={point} destination={destination} dropOff={dropOff} onFailure={()=>setFailed(true)}/>{destination&&<MapMarker longitude={destination.longitude} latitude={destination.latitude} anchor="bottom"><MarkerContent><span className="map-glyph" role="img" aria-label={MARKER_LABELS.destination}><PinGlyph fill={MARKER_COLORS.destination}/></span></MarkerContent></MapMarker>}
+ {point&&point.accuracyMeters>0&&point.accuracyMeters<20000000&&<MapGeoJSON data={accuracyArea(point)} fillPaint={{'fill-color':'#166534','fill-opacity':0.1}} linePaint={{'line-color':'#166534','line-width':1}}/>}{point&&target&&<MapGeoJSON data={directionLine(point,target)} fillPaint={false} linePaint={{'line-color':MARKER_COLORS.delivery,'line-width':2,'line-dasharray':[2,2]}}/>}<Updates point={point} destination={destination} dropOff={dropOff} onFailure={()=>setFailed(true)}/>{destination&&<MapMarker longitude={destination.longitude} latitude={destination.latitude} anchor="bottom"><MarkerContent><span className="map-glyph" role="img" aria-label={MARKER_LABELS.destination}><PinGlyph fill={MARKER_COLORS.destination}/></span></MarkerContent></MapMarker>}
  {dropOff&&<MapMarker longitude={dropOff.longitude} latitude={dropOff.latitude} anchor="bottom"><MarkerContent><span className="map-glyph" role="img" aria-label={MARKER_LABELS.dropOff}><PinGlyph fill={MARKER_COLORS.dropOff}/></span></MarkerContent></MapMarker>}
  {point&&<MapMarker longitude={point.longitude} latitude={point.latitude}><MarkerContent><span className="map-glyph" role="img" aria-label={MARKER_LABELS.delivery}><CarGlyph/></span></MarkerContent></MapMarker>}
- </Map></div></Boundary><ul className="map-legend" aria-label="Map key">{point&&<li><CarGlyph size={20}/><span><b>{MARKER_LABELS.delivery}</b> · reported accuracy ±{Math.round(point.accuracyMeters)} m.</span></li>}{destination&&<li><PinGlyph fill={MARKER_COLORS.destination} size={20}/><span><b>{MARKER_LABELS.destination}</b> · Inspector-verified market/stall pin.</span></li>}{dropOff&&<li><PinGlyph fill={MARKER_COLORS.dropOff} size={20}/><span><b>{MARKER_LABELS.dropOff}</b> · selected by Delivery Staff. Entrance/unloading point; final handover at assigned vendor stall.</span></li>}</ul></>:<p role="status">No authorized shared position or verified destination available.</p>}
+ </Map></div></Boundary><ul className="map-legend" aria-label="Map key">{point&&<li><CarGlyph size={20}/><span><b>{MARKER_LABELS.delivery}</b> · reported accuracy ±{Math.round(point.accuracyMeters)} m.</span></li>}{destination&&<li><PinGlyph fill={MARKER_COLORS.destination} size={20}/><span><b>{MARKER_LABELS.destination}</b> · Inspector-verified market/stall pin.</span></li>}{distance!==null&&<li><span className="route-key" aria-hidden="true"/><span><b>Direction to {targetLabel}</b> · about {distanceText(distance)} in a straight line. Not a road route.</span></li>}{dropOff&&<li><PinGlyph fill={MARKER_COLORS.dropOff} size={20}/><span><b>{MARKER_LABELS.dropOff}</b> · selected by Delivery Staff. Entrance/unloading point; final handover at assigned vendor stall.</span></li>}</ul></>:<p role="status">No authorized shared position or verified destination available.</p>}
  <p className="attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> · Online map · <a href="/mapcn-licenses/MAPCN-LICENSE" target="_blank" rel="noopener noreferrer">Component license</a></p>
  {failed&&<p role="alert">Map network unavailable. Authorized coordinates remain available in the workspace.</p>}</main>;
 }

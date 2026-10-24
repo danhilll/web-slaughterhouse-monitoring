@@ -1,8 +1,9 @@
 import {useEffect,useMemo,useRef,useState,type ReactElement,type ReactNode} from 'react';
 import {Link} from 'react-router-dom';
 import {BarChart,Bar,LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip} from 'recharts';
-import {ArrowDownRight,ArrowUpRight,CheckCircle2,Clock3,RefreshCw,Truck,UserCheck,Minus} from 'lucide-react';
+import {AlertTriangle,ArrowDownRight,ArrowUpRight,CheckCircle2,Clock3,RefreshCw,Truck,UserCheck,Minus} from 'lucide-react';
 import {apiFetch} from './api';
+import {paymentState} from './overdue';
 import {fetchCompleteList} from './listPages';
 import {completeCursorList,periodBounds,type Period} from './monitoringMetrics';
 import {chartBuckets,kpis,change,animalSeries,moneySeries,feeBreakdown,topVendors,pipeline,recentInvoices,type AnimalRow,type InvoiceRow,type Kpi} from './dashboardData';
@@ -88,7 +89,7 @@ export function Dashboard({dark=false}:{dark?:boolean}){
     <p className="dash-eyebrow">Outstanding balance</p>
     <p className="dash-big">{flow?(flow.outstanding===null?'Unavailable':peso(flow.outstanding)):value(null,'money')}</p>
     <p className="dash-sub">{flow?`${count(flow.unpaid)} unpaid invoice${flow.unpaid===1?'':'s'} · all dates`:'Unpaid invoices unavailable.'}</p>
-    <div className="dash-mini-stats"><div><span>In transit now</span><b>{flow?count(flow.counts.in_transit):'—'}</b></div><div><span>Awaiting assignment</span><b>{flow?count(flow.counts.awaiting):'—'}</b></div></div>
+    <div className="dash-mini-stats"><div><span>Overdue</span><b>{flow?count(flow.overdue):'—'}</b><small>{flow?(flow.overdueAmount===null?'Amount unavailable':peso(flow.overdueAmount)):''}</small></div><div><span>In transit now</span><b>{flow?count(flow.counts.in_transit):'—'}</b><small>{flow?`${count(flow.counts.awaiting)} awaiting assignment`:''}</small></div></div>
     <Link className="dash-link" to="/billing">Open invoices & payments →</Link>
    </section>
   </div>
@@ -132,7 +133,7 @@ export function Dashboard({dark=false}:{dark?:boolean}){
    <header className="dash-table-head"><div><h2>Recent invoices</h2><p>Latest {recent.length||''} by issue date · AINV is an internal bill reference, not an official receipt.</p></div><Link className="dash-link" to="/invoice-history">All invoice records →</Link></header>
    {invoices===null?unavailable(null):!recent.length?<p className="dash-empty">No invoices yet.</p>:<div className="dash-table-wrap"><table className="dash-table"><thead><tr><th>Bill reference</th><th>Vendor</th><th>Animal</th><th>Issued</th><th className="num">Amount</th><th>Payment</th><th>Delivery</th></tr></thead><tbody>{recent.map(r=><tr key={r.id}>
     <td className="mono">{r.id}</td><td>{r.vendor_name||'Unknown vendor'}</td><td>{r.number_of_heads_pig?'Pig':r.number_of_heads_cow?'Cow':'—'}</td><td>{longDay(r.date_issued!)}</td><td className="num">{typeof r.total_amount==='number'&&Number.isFinite(r.total_amount)?peso(r.total_amount):'Unavailable'}</td>
-    <td>{r.payment_status==='Paid'?<span className="dash-pill is-good"><CheckCircle2 size={13} aria-hidden="true"/>Paid</span>:r.payment_status==='Unpaid'?<span className="dash-pill"><Clock3 size={13} aria-hidden="true"/>Unpaid</span>:'Unavailable'}</td>
+    <td>{(()=>{const st=paymentState(r);return st==='Paid'?<span className="dash-pill is-good"><CheckCircle2 size={13} aria-hidden="true"/>Paid</span>:st==='Overdue'?<span className="dash-pill is-warning"><AlertTriangle size={13} aria-hidden="true"/>Overdue</span>:st==='Unpaid'?<span className="dash-pill"><Clock3 size={13} aria-hidden="true"/>Unpaid</span>:'Unavailable';})()}</td>
     <td>{r.delivery?DELIVERY[r.delivery.status||'']||'Unrecognised':'Not assigned'}</td></tr>)}</tbody></table></div>}
   </section>
   <p className="dash-footnote">Read-only. Totals use complete record lists: invoices by issue date, payments by recording time, deliveries by completion time, animals by registration time. Changes are compared with {versus}. Weeks start Monday.</p>
