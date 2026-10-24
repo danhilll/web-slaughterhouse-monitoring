@@ -58,6 +58,19 @@ function vendorView(vendor) {
     'animal_type', 'created_at', 'status', 'municipalScopeId'].map((key) => [key, vendor[key]]));
 }
 
+// The weight basis recorded on the invoice at issue, so the vendor bill can state it. Allow-listed per
+// method; a malformed snapshot is omitted (the bill then says the basis is not shown), never guessed.
+const positiveInt = (v) => Number.isSafeInteger(v) && v > 0;
+const BASIS_KEYS = { measured: ['method', 'liveWeightGrams', 'carcassWeightGrams', 'weighedAt', 'measurementRevision', 'animalRevision'],
+  calculated_80_percent: ['method', 'liveWeightGrams', 'factor', 'carcassWeightGrams', 'rule', 'rounding', 'animalRevision'] };
+function basisView(basis) {
+  const keys = basis && typeof basis === 'object' && !Array.isArray(basis) ? BASIS_KEYS[basis.method] : undefined;
+  if (!keys || !['liveWeightGrams', 'carcassWeightGrams', 'animalRevision'].every((k) => positiveInt(basis[k]))) return undefined;
+  if (basis.method === 'measured' && !(positiveInt(basis.measurementRevision) && string(basis.weighedAt))) return undefined;
+  if (basis.method === 'calculated_80_percent' && basis.factor !== 0.8) return undefined;
+  return Object.fromEntries(keys.filter((k) => basis[k] !== undefined).map((k) => [k, basis[k]]));
+}
+
 function invoiceView(invoice, principal) {
   if (!identifier(invoice.id) || invoice.vendor_id !== principal.vendorBusinessId ||
       invoice.municipalScopeId !== principal.municipalScopeId ||
@@ -71,7 +84,13 @@ function invoiceView(invoice, principal) {
   const keys = ['id', 'vendor_id', 'municipalScopeId', 'slaughter_record_id', 'date_issued', 'due_date',
     'number_of_heads_cow', 'number_of_heads_pig', 'corral_fee', 'delivery_fee', 'anti_mortem_fee',
     'facility_fee', 'total_amount', 'payment_status', 'notes', 'vendor_name'];
-  return Object.fromEntries(keys.filter((key) => invoice[key] !== undefined).map((key) => [key, invoice[key]]));
+  const view = Object.fromEntries(keys.filter((key) => invoice[key] !== undefined).map((key) => [key, invoice[key]]));
+  const basis = basisView(invoice.carcassBasis);
+  if (basis && (invoice.animalRevision === undefined || invoice.animalRevision === basis.animalRevision)) {
+    view.carcassBasis = basis;
+    if (positiveInt(invoice.animalRevision)) view.animalRevision = invoice.animalRevision;
+  }
+  return view;
 }
 
 // Factory keeps HTTP handlers testable without initializing Firebase or loading credentials.

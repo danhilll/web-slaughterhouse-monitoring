@@ -249,3 +249,28 @@ test('verified email never substitutes for active approved membership or matchin
     assert.equal((await request('/api/mobile/me')).status, 403);
   }
 });
+
+test('vendor invoices carry the allow-listed weight basis recorded at issue; malformed snapshots are omitted', async t => {
+  const calculated = { method: 'calculated_80_percent', liveWeightGrams: 100000, factor: 0.8, carcassWeightGrams: 80000, rule: 'live_x_0.8', rounding: 'nearest_gram', animalRevision: 2, internal: 'x' };
+  const measured = { method: 'measured', liveWeightGrams: 100000, carcassWeightGrams: 79500, weighedAt: '2026-10-01T01:00:00.000Z', measurementRevision: 1, animalRevision: 3 };
+  const { request } = await fixture(t, state => {
+    Object.assign(state.invoices[0], { carcassBasis: calculated, animalRevision: 2 });
+    Object.assign(state.invoices[1], { carcassBasis: measured, animalRevision: 3 });
+    Object.assign(state.invoices[2], { carcassBasis: { ...calculated, factor: 0.9 }, animalRevision: 2 });
+  });
+  const rows = [...(await request('/api/mobile/invoices?limit=2')).body.items];
+  const { body } = await request('/api/mobile/invoices?limit=2');
+  rows.push(...(await request(`/api/mobile/invoices?limit=2&cursor=${body.nextCursor}`)).body.items);
+  const { internal, ...publicCalculated } = calculated;
+  assert.deepEqual(rows[0].carcassBasis, publicCalculated); assert.equal(rows[0].animalRevision, 2);
+  assert.deepEqual(rows[1].carcassBasis, measured); assert.equal(rows[1].animalRevision, 3);
+  assert.equal(rows[2].carcassBasis, undefined); assert.equal(rows[2].animalRevision, undefined);
+});
+
+test('a weight basis whose revision disagrees with the invoice is omitted', async t => {
+  const { request } = await fixture(t, state => {
+    Object.assign(state.invoices[0], { carcassBasis: { method: 'calculated_80_percent', liveWeightGrams: 100000, factor: 0.8, carcassWeightGrams: 80000, animalRevision: 2 }, animalRevision: 5 });
+  });
+  const row = (await request('/api/mobile/invoices?limit=2')).body.items[0];
+  assert.equal(row.carcassBasis, undefined); assert.equal(row.animalRevision, undefined);
+});
