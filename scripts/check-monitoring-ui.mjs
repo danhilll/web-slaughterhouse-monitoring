@@ -31,22 +31,29 @@ try {
  page.on('request',r=>{if(r.method()!=='GET')mutations.push([r.method(),new URL(r.url()).pathname]);});
  const now=new Date().toISOString();
  let mode='populated';const held=[];
- const invoiceRows=()=>[...f.rows].filter(([k])=>k.startsWith('invoices/')).map(([,r])=>({...r}));
+ const invoiceRows=()=>[...f.rows].filter(([k])=>k.startsWith('invoices/')).map(([,r])=>({...r})).concat(history.invoices);
+ // Deterministic synthetic history for the Dashboard: 45 days of animals, invoices, payments and deliveries.
+ const history=(()=>{const vendors=['Synthetic Meat Stall A','Synthetic Meat Stall B','Synthetic Market C','Synthetic Vendor D','Synthetic Vendor E','Synthetic Vendor F'],animals=[],invoices=[];let seed=7;const rnd=()=>(seed=(seed*48271)%2147483647)/2147483647;
+  const manila=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(t);
+  for(let d=44;d>=0;d--){const base=Date.now()-d*86400000;const n=1+Math.floor(rnd()*4);for(let j=0;j<n;j++){const t=new Date(base-Math.floor(rnd()*6)*3600000);const species=rnd()<0.8?'Pig':'Cow';const id=`SYN-${d}-${j}`;animals.push({id:'ANM-'+id,createdAt:t.toISOString(),species,vendorBusinessId:'VEN-'+(j%6)});
+   if(rnd()<0.85){const paid=rnd()<0.72&&d>0,delivered=paid&&rnd()<0.8;const v=Math.floor(rnd()*rnd()*6);invoices.push({id:'AINV-'+id,vendor_id:'VEN-'+v,vendor_name:vendors[v],date_issued:manila(t),total_amount:95,corral_fee:15,delivery_fee:25,anti_mortem_fee:10,facility_fee:45,number_of_heads_pig:species==='Pig'?1:0,number_of_heads_cow:species==='Cow'?1:0,payment_status:paid?'Paid':'Unpaid',...(paid?{payment:{amountCents:9500,method:'cash',receiptReference:'SYN-OR-'+id,recordedAt:new Date(t.getTime()+3600000*(2+Math.floor(rnd()*20))).toISOString()}}:{}),...(delivered?{delivery:{status:'delivered',deliveredAt:new Date(t.getTime()+3600000*30).toISOString()}}:rnd()<0.3?{delivery:{status:rnd()<0.5?'assigned':'in_transit'}}:{})});}}}
+  return {animals,invoices};})();
  await page.route('**/api/**',async route=>{
   const url=new URL(route.request().url());
   if(mode==='loading'){held.push(route);return;}
   if(mode==='error')return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({message:'Synthetic service outage.'})});
   if(url.pathname.startsWith('/api/operations/'))return route.continue();
   const empty=mode==='empty';let body={items:[],nextCursor:null};
-  if(url.pathname==='/api/animals'&&!empty)body={items:[{id:'ANM-SYNTHETIC',createdAt:now}],nextCursor:null};
-  if(url.pathname==='/api/invoices'&&!empty)body={items:invoiceRows(),nextCursor:null};
+  if(url.pathname==='/api/animals'&&!empty){const all=[{id:'ANM-SYNTHETIC',createdAt:now,species:'Pig'},...history.animals],start=Number(url.searchParams.get('cursor')||0);body={items:all.slice(start,start+25),nextCursor:start+25<all.length?String(start+25):null};}
+  if(url.pathname==='/api/invoices'&&!empty){const all=invoiceRows(),start=Number(url.searchParams.get('cursor')||0);body={items:all.slice(start,start+100),nextCursor:start+100<all.length?String(start+100):null};}
   if(url.pathname==='/api/vendors'&&!empty)body={items:[{id:'VEN-SYNTHETIC',name:'Synthetic Market Vendor',address:'Sample stall',status:'Active'}],nextCursor:null};
   if(url.pathname==='/api/accounts/settings')body={enabled:true,canManageAccounts:true,canDeactivate:true,canActivateAccounts:true,municipalScopeId:'SCOPE',municipalityName:'Synthetic municipality',staffInspectorAvailable:true};
   if(url.pathname==='/api/accounts'&&!empty)body={items:[{uid:'U-SYN',fullName:'Synthetic Staff',email:'staff@example.test',role:'staff',status:'pending',invitationStatus:'sent',staffPermissions:['billing']}],nextCursor:null};
   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
  });
  const open=async destination=>{await page.goto(origin+destination,{waitUntil:'domcontentloaded'});await page.locator('h1').waitFor({timeout:60000});};
- const shot=name=>page.screenshot({path:path.join(evidence,name+'.png'),fullPage:true});
+ // Let charts finish painting before a full-page capture (headless capture can reuse a stale raster).
+ const shot=async name=>{await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));await page.waitForTimeout(300);await page.screenshot({path:path.join(evidence,name+'.png'),fullPage:true});};
  const noOverflow=async label=>{const r=await page.evaluate(()=>({over:document.documentElement.scrollWidth>innerWidth,sw:document.documentElement.scrollWidth,cw:document.documentElement.clientWidth,iw:innerWidth,vw:innerWidth,wide:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).slice(-4).map(e=>e.tagName+'.'+e.className+' '+(e.textContent||'').slice(0,50))}));assert.equal(r.over,false,'horizontal overflow '+label+' '+JSON.stringify(r));};
  const tag=d=>d.replaceAll('/','')||'overview';
  await page.setViewportSize({width:1440,height:1000});
@@ -66,7 +73,7 @@ try {
  await open('/delivery');await page.getByText('No authorized assignments on this page',{exact:false}).waitFor();await shot('state-empty-delivery');
  await open('/vendors');await page.getByText('No matching records.',{exact:true}).waitFor();await shot('state-empty-vendors');
  await open('/');await page.getByText('Loading…',{exact:true}).first().waitFor({state:'detached'});
- assert.equal(await page.locator('.metric-value').first().textContent(),'0');await shot('state-empty-overview');
+ assert.equal(await page.locator('.dash-hero-value').textContent(),'₱0.00');assert.equal(await page.locator('.dash-kpi .metric-value').first().textContent(),'0');await page.getByText('No animals registered in this range yet.').waitFor();await shot('state-empty-overview');
  // Populated: one assigned, in-transit, paid invoice issued through the real routers.
  const inv=(await f.call('/animals/ANM-A/invoice','billing',bill)).body;
  assert.equal((await f.call(`/invoices/${inv.id}/delivery`,'inspector',{expectedRevision:1,assigneeUid:'delivery',destination:'Synthetic Market / Meat / Stall A',destinationConfirmed:true})).status,200);
@@ -81,7 +88,7 @@ try {
    if(await page.getByRole('button',{name:desired,exact:true}).count())await page.getByRole('button',{name:desired,exact:true}).click();
    for(const destination of pages) {
     await open(destination);
-    if(destination==='/'){await page.getByText('Loading…',{exact:true}).first().waitFor({state:'detached'});await page.getByRole('button',{name:'Week',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Week'}).getAttribute('aria-pressed'),'true');}
+    if(destination==='/'){await page.getByText('Loading…',{exact:true}).first().waitFor({state:'detached'});await page.getByRole('button',{name:'This month',exact:true}).click();assert.equal(await page.getByRole('button',{name:'This month',exact:true}).getAttribute('aria-pressed'),'true');for(const chart of ['Registrations by species','Billed vs collected','Fee breakdown','Top vendors','Delivery pipeline','Recent invoices'])await page.getByRole('region',{name:chart,exact:true}).waitFor();assert.ok(await page.locator('.recharts-bar-rectangle').count()>0,'animal bars');assert.equal(await page.locator('.recharts-line').count(),2);assert.equal(await page.getByRole('alert').count(),0);assert.notEqual(await page.locator('.dash-hero-value').textContent(),'Unavailable');}
     if(destination==='/billing')await page.getByRole('heading',{name:`Internal bill reference: ${inv.id}`}).waitFor();
     if(destination==='/delivery')await page.getByText('Stall A',{exact:false}).first().waitFor();
     if(destination==='/users')await page.getByRole('button',{name:'Activate mobile access'}).waitFor();

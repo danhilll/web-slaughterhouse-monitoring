@@ -6,7 +6,8 @@ import { UsersPage } from './UsersPage';
 import { AnimalsPage } from './AnimalsPage';
 import { OperationsPage } from './OperationsPage';
 import { WorkspaceBrand } from './WorkspaceIdentity';
-import { MonitoringHome, MonitoringDirectory, FeeSummary, HelpPage, SettingsPage } from './MonitoringPages';
+import { MonitoringDirectory, FeeSummary, HelpPage, SettingsPage } from './MonitoringPages';
+import { Dashboard } from './Dashboard';
 
 type Props = { session: WebSession; onLogout: () => Promise<void> };
 export default function App({session, onLogout}: Props) {
@@ -53,7 +54,7 @@ function DashboardLayout({session,onLogout,darkMode,setDarkMode}: Props & {darkM
   }, [profileMenuOpen]);
 
   const navItems = [
-    { label: 'Overview', to: '/', icon: Gauge },
+    { label: 'Dashboard', to: '/', icon: Gauge },
     { label: 'Animals', to: '/animals', icon: ClipboardList },
     { label: 'Vendors', to: '/vendors', icon: Users },
     { label: 'Invoices & payments', to: '/billing', icon: FileText },
@@ -66,7 +67,7 @@ function DashboardLayout({session,onLogout,darkMode,setDarkMode}: Props & {darkM
   ];
 
   const pageTitles: Record<string, string> = {
-    '/': 'Overview',
+    '/': 'Dashboard',
     '/records': 'Slaughter Records',
     '/invoices': 'Invoices',
     '/statistics': 'Statistics',
@@ -82,7 +83,7 @@ function DashboardLayout({session,onLogout,darkMode,setDarkMode}: Props & {darkM
   };
   const currentTitle = pageTitles[location.pathname] || 'Dashboard';
   const pageDescriptions: Record<string, string> = {
-    '/': 'A complete picture of your municipal operations.',
+    '/': 'Live read-only view of animals, billing, collections and deliveries.',
     '/records': 'Track livestock intake and daily slaughter activity.',
     '/animal-records': 'Read animal records without registration, correction or carcass controls.',
     '/billing': 'Review invoices, recorded payments and balances.',
@@ -199,7 +200,7 @@ function DashboardLayout({session,onLogout,darkMode,setDarkMode}: Props & {darkM
             <div role="status" className="workspace-notice"><ShieldCheck size={18} /><p>Monitor records here. Record daily work in the mobile app.</p></div>
             <div>
             <Routes>
-              <Route path="/" element={<MonitoringHome />} />
+              <Route path="/" element={<Dashboard dark={darkMode} />} />
               <Route path="/statistics" element={<Navigate to="/" replace />} />
               <Route path="/records" element={<MonitoringDirectory kind="records" />} />
               <Route path="/invoices" element={<Navigate to="/billing" replace />} />
