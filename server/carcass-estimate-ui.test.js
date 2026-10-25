@@ -7,6 +7,7 @@ import React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import {renderToStaticMarkup} from 'react-dom/server';
 import * as estimates from '../shared/carcassEstimate.js';
+import * as lucide from 'lucide-react';
 
 function component() {
   const load = (file, modules={}) => {
@@ -20,26 +21,27 @@ function component() {
   };
   return load('../src/AnimalsPage.tsx',{
     react:React,'react/jsx-runtime':jsxRuntime,'./api':{apiFetch:()=>{throw Error('No API requests in render tests');}},
-    './carcassWeight':load('../src/carcassWeight.ts'),'./animalRegistrationTime':load('../src/animalRegistrationTime.ts'),'../shared/carcassEstimate.js':estimates
+    './carcassWeight':load('../src/carcassWeight.ts'),'./animalRegistrationTime':load('../src/animalRegistrationTime.ts'),'../shared/carcassEstimate.js':estimates,
+    './displayTime':load('../src/displayTime.ts'),'./ui/RecordParts':load('../src/ui/RecordParts.tsx',{react:React,'react/jsx-runtime':jsxRuntime,'lucide-react':lucide})
   }).CarcassWeightSummary;
 }
 const animal={weightGrams:85001,revision:2,carcassWeight:null};
 test('web labels legacy-derived estimate and live revision without any measured timestamp',()=>{
-  const html=renderToStaticMarkup(React.createElement(component(),{animal}));
-  assert.match(html,/Calculated carcass weight \(80% of live weight\): 68\.001 kg/);
+  const html=renderToStaticMarkup(React.createElement(component(),{animal})).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ');
+  assert.match(html,/Calculated carcass weight \(80% of live weight\) 68\.001 kg/);
   assert.match(html,/80% of live weight/);
   assert.match(html,/animal revision 2/);
   assert.match(html,/Not scale-measured/);
-  assert.match(html,/Selected carcass weight: 68\.001 kg \(calculated, 80% of live weight\)/);
-  assert.doesNotMatch(html,/Scale-measured carcass weight:|Measured \d|Measurement revision/);
+  assert.match(html,/Selected carcass weight 68\.001 kg \(calculated, 80% of live weight\)/);
+  assert.doesNotMatch(html,/Scale-measured carcass weight|measured \d|Measurement revision/);
 });
 test('web preserves both values and selects historical measured grams with explicit review warning',()=>{
   const record={...animal,carcassEstimate:estimates.estimateCarcassWeight(85001,2),
     carcassWeight:{weightGrams:65001,weighedAt:'2026-10-20T00:00:00Z',revision:3,animalRevision:1}};
-  const html=renderToStaticMarkup(React.createElement(component(),{animal:record}));
-  assert.match(html,/Calculated carcass weight \(80% of live weight\): 68\.001 kg/);
-  assert.match(html,/Scale-measured carcass weight: 65\.001 kg/);
-  assert.match(html,/Selected carcass weight: 65\.001 kg \(scale-measured\)/);
+  const html=renderToStaticMarkup(React.createElement(component(),{animal:record})).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ');
+  assert.match(html,/Calculated carcass weight \(80% of live weight\) 68\.001 kg/);
+  assert.match(html,/Scale-measured carcass weight 65\.001 kg/);
+  assert.match(html,/Selected carcass weight 65\.001 kg \(scale-measured\)/);
   assert.match(html,/Earlier animal revision; review and reinspection required/);
   assert.match(html,/Measurement revision 3/);
 });

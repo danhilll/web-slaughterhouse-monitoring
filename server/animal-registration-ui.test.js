@@ -21,7 +21,7 @@ function fixture(){
     if(i===10)hooks[i]=false;
   }return [hooks[i],value=>{hooks[i]=typeof value==='function'?value(hooks[i]):value;}];}};
   const api={apiFetch:async(url,init={})=>{requests.push({url,...init});return Response.json(init.method==='POST'?{}:{items:[],nextCursor:null});}};
-  const {AnimalsPage}=load('../src/AnimalsPage.tsx',{react,'react/jsx-runtime':jsxRuntime,'./api':api,'./carcassWeight':load('../src/carcassWeight.ts'),'./animalRegistrationTime':load('../src/animalRegistrationTime.ts')});
+  const {AnimalsPage}=load('../src/AnimalsPage.tsx',{react,'react/jsx-runtime':jsxRuntime,'./api':api,'./carcassWeight':load('../src/carcassWeight.ts'),'./animalRegistrationTime':load('../src/animalRegistrationTime.ts'),'./displayTime':load('../src/displayTime.ts'),'./ui/RecordParts':{Badge:()=>null,Fields:()=>null,MoreDetails:()=>null,Note:()=>null,RecordCard:()=>null}});
   const render=()=>{cursor=0;return AnimalsPage();};
   function nodes(tree){if(!tree||typeof tree!=='object')return [];return [tree,...[tree.props?.children].flat(Infinity).flatMap(nodes)];}
   const find=fn=>nodes(render()).find(fn);
