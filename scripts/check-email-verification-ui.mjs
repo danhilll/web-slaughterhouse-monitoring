@@ -102,11 +102,11 @@ try {
   await button('Sign in to workspace').click();
   await page.getByRole('heading',{name:'Authorized workspace sentinel'}).waitFor();
   const vendorCard=page.locator('article').filter({has:page.getByText('vendor@example.test',{exact:true})});
-  await vendorCard.waitFor();assert.match(await vendorCard.innerText(),/vendor · pending/);
+  await vendorCard.waitFor();assert.deepEqual(await vendorCard.locator('.badge').allInnerTexts().then(t=>t.map(x=>x.trim()).slice(0,2)),['Vendor','Pending activation']);
   assert.equal(await page.locator('input[type=password]').count(),0);
   page.once('dialog',async dialog=>{assert.match(dialog.message(),/Email verification remains required/);await dialog.accept();});
   await vendorCard.getByRole('button',{name:'Activate mobile access',exact:true}).click();
-  await page.waitForFunction(()=>[...document.querySelectorAll('article')].some(el=>el.textContent?.includes('vendor@example.test')&&el.textContent.includes('vendor · active')));
+  await page.waitForFunction(()=>[...document.querySelectorAll('article')].some(el=>el.textContent?.includes('vendor@example.test')&&[...el.querySelectorAll('.badge')].map(b=>b.textContent?.trim()).join('|').startsWith('Vendor|Active|')));
   await button('Normal logout').click();
   await button('Sign in to workspace').waitFor();
   assert.equal(await page.getByRole('heading',{name:'Authorized workspace sentinel'}).count(),0);

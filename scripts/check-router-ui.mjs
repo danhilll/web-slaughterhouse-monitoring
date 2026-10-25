@@ -23,7 +23,7 @@ const routes = [
   ['/delivery', 'Deliveries', 'Deliveries'],
   ['/users', 'Mobile Users', 'Mobile'],
   ['/notifications', 'Notifications', 'Notifications'],
-  ['/invoice-history', 'All invoice records', 'ROUTER-INVOICE'],
+  ['/invoice-history', 'All invoice records', 'Synthetic route business'],
   ['/service-computation', 'Fee summary', 'Approved fees'],
   ['/settings', 'Settings', 'Settings'],
   ['/faq', 'FAQ', 'What can each role do?']
@@ -111,6 +111,8 @@ try {
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await login();
   await at('/invoice-history?source=direct#record', 'All invoice records');
+  await page.locator('#workspace-content').getByRole('heading', { name: 'Synthetic route business', exact: true }).waitFor();
+  await page.locator('#workspace-content summary', { hasText: 'Bill reference' }).click();
   await page.locator('#workspace-content').getByText('ROUTER-INVOICE', { exact: true }).waitFor();
   pass('anonymous deep link blocked; denied account stays outside workspace; login retains URL/query/hash');
 
