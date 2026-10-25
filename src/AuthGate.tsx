@@ -240,7 +240,7 @@ export default function AuthGate() {
               </p>
             )}
             {authUser && verificationRequired && <section aria-label="Email verification" className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-950">
-              <p>Verify your mailbox through Firebase. You can verify or recover your account here even if you use the mobile app. Verification does not approve membership or grant administrator access.</p>
+              <p>Verify your mailbox through Firebase to continue. This also works for mobile-app accounts.</p><p className="mt-2">Verification alone does not approve membership or grant administrator access.</p>
               <button type="button" disabled={verificationBusy} onClick={() => void handleVerification(false)} className="btn-secondary mt-3 w-full">Send verification email</button>
               <button type="button" disabled={verificationBusy} onClick={() => void handleVerification(true)} className="btn-secondary mt-2 w-full">I verified my email — check again</button>
             </section>}
@@ -268,7 +268,7 @@ export default function AuthGate() {
             <button type="button" disabled={(!email.trim() && !authUser?.email) || resetting} onClick={() => void handlePasswordReset()} className="btn-ghost mt-3 w-full">
               {resetting ? 'Sending reset email…' : 'Reset Firebase password'}
             </button>
-            <p className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">Use your own mailbox to recover your Firebase password. Administrators cannot view or assign your password. Recovery does not activate membership.</p>
+            <p className="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">Reset links go to your own mailbox. Administrators never see or assign passwords, and a reset does not activate membership.</p>
             {authUser && <button type="button" onClick={() => void handleSignOut()} className="btn-ghost mt-4 w-full">Sign out</button>}
           </>
         )}

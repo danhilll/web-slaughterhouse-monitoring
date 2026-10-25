@@ -2,6 +2,8 @@
 import { apiFetch } from './api';
 import { Mail, ShieldCheck, UserPlus, Search } from 'lucide-react';
 import { VendorRegistrationForm, type RegisteredBusiness } from './VendorRegistrationForm';
+import { manilaTime } from './displayTime';
+import { Badge } from './ui/RecordParts';
 
 type Account = { uid: string; fullName: string; email: string; role: string; status: string; invitationStatus: string; vendorBusinessId?: string; staffPermissions?: string[] };
 type Settings = { enabled: boolean; canManageAccounts: boolean; canDeactivate: boolean; municipalScopeId: string | null; municipalityName: string; staffInspectorAvailable: boolean; canActivateAccounts: boolean };
@@ -95,8 +97,9 @@ export function UsersPage() {
   const visible = items.filter(a => `${a.fullName} ${a.email} ${a.role}`.toLowerCase().includes(query.toLowerCase()));
   return <div className="space-y-6">
     <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
-      <div className="flex items-center gap-3"><ShieldCheck className="text-emerald-600" /><div><h2 className="text-xl font-bold">Mobile users</h2><p className="text-sm text-slate-500">Create and manage access for vendors, staff and inspectors.</p></div></div>
-      <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">Users choose a password through their setup email.<br />Accounts stay pending until an authorized administrator approves access.<br />Email verification is also required.<br />Password setup and approval do not replace verification.{!settings?.canActivateAccounts && ' Activation is not enabled in this environment.'}</p>
+      <div className="flex items-center gap-3"><ShieldCheck className="text-emerald-600" /><p className="text-slate-600 dark:text-slate-300">Create and manage mobile access for vendors, staff and inspectors.</p></div>
+      <ol className="access-steps"><li>The person sets a password from the setup email.</li><li>An authorized administrator activates access. Until then it stays pending.</li><li>The person verifies their email. Password setup and activation do not replace this.</li></ol>
+      {!settings?.canActivateAccounts && <p className="text-sm text-slate-600 dark:text-slate-300">Activation is not enabled in this environment.</p>}
       <button className="btn-secondary mt-3" disabled={busy || loading} onClick={() => void action(async () => { const s = await request<Settings>('/settings'); if (!alive.current) return; setSettings(s); if (s.enabled) await Promise.all([load(), loadVendors()]); })}>Refresh users</button>
       {loading && <p role="status" className="mt-4">Loading account settings...</p>}
       {!loading && !settings?.enabled && <p className="mt-4 rounded-xl bg-amber-50 p-4 text-amber-900">Account management is awaiting approved municipal setup. Live account creation is currently unavailable.</p>}
@@ -128,7 +131,7 @@ export function UsersPage() {
         <label className="mb-4 flex items-center gap-2"><Search size={18} /><span className="sr-only">Search loaded users</span><input className="input w-full" placeholder="Search loaded users by name, email or role" value={query} onChange={e => setQuery(e.target.value)} /></label>
         <p className="mb-4 text-xs text-slate-500">{items.length} users loaded{cursor ? '. More users are available below.' : '.'} Search applies to loaded users.</p>
         <div className="space-y-3">{visible.map(a => <article key={a.uid} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{a.fullName}</h3><p className="break-all text-sm text-slate-500">{a.email}</p><p className="mt-2 text-sm">{a.role} · {a.status} · Invitation: {a.invitationStatus}</p>{a.vendorBusinessId && <p className="text-xs text-slate-500">Business: {a.vendorBusinessId}</p>}</div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div className="grid gap-2"><div><h3 className="font-semibold">{a.fullName}</h3><p className="break-all text-sm text-slate-500">{a.email}</p></div><div className="record-badges"><Badge tone="info">{a.role[0].toUpperCase() + a.role.slice(1)}</Badge><Badge tone={a.status === 'active' ? 'good' : a.status === 'inactive' ? 'danger' : 'warning'}>{a.status === 'active' ? 'Active' : a.status === 'inactive' ? 'Inactive' : a.status === 'pending' ? 'Pending activation' : a.status}</Badge><Badge>{`Invitation: ${a.invitationStatus}`}</Badge></div>{a.vendorBusinessId && <p className="text-sm text-slate-500">Business: {a.vendorBusinessId}</p>}{a.role === 'staff' && <p className="text-sm text-slate-500">Functions: {a.staffPermissions?.length ? a.staffPermissions.join(', ') : 'none saved'}</p>}</div>
             <div className="flex flex-wrap gap-2">
               {settings.canActivateAccounts && a.status === 'pending' && ['vendor', 'staff', 'inspector'].includes(a.role) && <button className="btn-primary" disabled={busy || (a.role === 'staff' && !a.staffPermissions?.length)} onClick={() => {
                 if (window.confirm(`Approve ${a.role} membership for ${a.fullName} in ${settings.municipalityName || settings.municipalScopeId}?${a.role === 'staff' ? ` Saved functions: ${a.staffPermissions?.join(', ')}.` : ''} Email verification remains required.`)) void action(async () => {
@@ -145,7 +148,7 @@ export function UsersPage() {
         {!visible.length && <p className="py-6 text-sm text-slate-500">{items.length ? 'No loaded users match your search.' : 'No managed mobile accounts yet. Historical Firebase accounts require a separate ownership review.'}</p>}
         {cursor && <button className="btn-secondary mt-4" disabled={busy} onClick={() => void action(() => load(cursor))}>Load more users</button>}
       </section>
-      {selected && <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900"><div className="flex justify-between"><h3 className="font-bold">Latest 20 events - {selected.fullName}</h3><button className="btn-secondary" onClick={() => setSelected(null)}>Close</button></div>{history.map((a, i) => <p key={i} className="mt-3 text-sm">{new Date(a.at).toLocaleString()} · {a.action} · Administrator {a.actorUid}</p>)}{!history.length && <p className="mt-3">No audit events available.</p>}</section>}
+      {selected && <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900"><div className="flex justify-between"><h3 className="font-bold">Latest 20 events - {selected.fullName}</h3><button className="btn-secondary" onClick={() => setSelected(null)}>Close</button></div>{history.map((a, i) => <p key={i} className="mt-3 text-sm"><time dateTime={a.at} title={a.at}>{manilaTime(a.at)}</time> · {a.action} · Administrator {a.actorUid}</p>)}{!history.length && <p className="mt-3">No audit events available.</p>}</section>}
     </>}
   </div>;
 }
