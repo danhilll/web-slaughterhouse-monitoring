@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { manilaTime } from './displayTime';
-import {paymentText} from './overdue';
+import {paymentState} from './overdue';
+import {Badge,Fields,MoreDetails,Note,RecordCard,Toolbar,dayText,paymentBadge,type Row} from './ui/RecordParts';
 import { Link } from 'react-router-dom';
 import { apiFetch } from './api';
 import { validateBillingAmounts, validateWorkspaceSettings, type RecordedFeeSnapshot } from './operationsWorkspace';
@@ -37,27 +38,43 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
  };
  useEffect(()=>{setTrackingId(null);setInvoices([]);setDeliveries([]);setCursor(null);void load();return()=>{epoch.current++;controller.current?.abort();};},[mode]);
  useEffect(()=>{if(workspace)setMode(workspace);},[workspace]);
+ const deliveryStatus=(d:Delivery)=>completedIds.has(d.id)?'delivered':d.delivery.status;
+ const statusBadge=(status:string)=>status==='delivered'?<Badge tone="good">Delivered</Badge>:status==='in_transit'?<Badge tone="info">In transit</Badge>:<Badge>{status.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase())}</Badge>;
+ const kg=(grams:number)=>`${grams/1000} kg`;
  return <div className="space-y-5">
-  <section className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
-   <h2 className="text-xl font-bold">{mode==='billing'?'Invoices & payments':'Deliveries'}</h2>
-   {!workspace&&<nav aria-label="Operations workspaces" className="my-3 flex gap-3"><button className="btn-secondary" disabled={busy} onClick={()=>setMode('billing')}>Billing</button><button className="btn-secondary" disabled={busy} onClick={()=>setMode('delivery')}>Delivery</button></nav>}
-   <p className="mt-2 text-sm">{mode==='billing'?'Review bills, balances and recorded cash payments.':'Review deliveries, destinations and shared positions.'}</p>
-   <p className="mt-2"><Link className="underline" to="/animal-records">View animals</Link> · Register and inspect animals in the mobile app.</p>
-   <button className="btn-secondary mt-4" disabled={busy} onClick={()=>void load()}>Refresh {mode === 'billing' ? 'invoices' : 'deliveries'}</button>
-   {busy&&<p role="status" className="mt-3">Loading {mode} workspace…</p>}{error&&<p role="alert" className="mt-3 text-red-700">{error}</p>}
-   <p className="mt-3">Monitoring only. Record daily work in the mobile app.</p>
-   {mode==='billing'&&<Link className="btn-secondary mt-3" to="/invoice-history">All invoice records, including earlier bills</Link>}
-  </section>
-  {!busy&&!error&&mode==='billing'&&<>
-   <h3 className="font-bold">Invoices on this page</h3><p className="text-sm">Refresh after mobile activity to see recorded payments.</p>{!invoices.length&&<p>No animal invoices on this page. Animal records are not invoice history.</p>}
-   {invoices.map(i=><article className="rounded-xl border p-5" key={i.id}><h4 className="font-bold">Internal bill reference: {i.id}</h4>{i.syntheticOnly&&<p>Synthetic rehearsal invoice</p>}<p>{i.vendor_name} · owning business {i.vendor_id}</p><p>Animal {i.animalIdentifier} · invoiced revision {i.animalRevision}</p><p>Total {currency(i.totalCents)} · recorded paid {currency(i.paidCents)} · balance {currency(i.balanceCents)}</p><p>{paymentText(i)} · issued {i.date_issued} · due {i.due_date}</p>{i.feeScheduleSnapshot?<p>Recorded fee schedule version {i.feeScheduleSnapshot.version} · Corral {currency(i.feeScheduleSnapshot.corralCents)} · Delivery {currency(i.feeScheduleSnapshot.deliveryCents)} · Inspection {currency(i.feeScheduleSnapshot.inspectionCents)} · Facility {currency(i.feeScheduleSnapshot.facilityCents)}. Stored invoice snapshot; current rates do not recalculate it.</p>:<p>Historical fee snapshot unavailable; stored invoice amounts are unchanged.</p>}{i.carcassBasis?<p>Carcass basis at issue: {carcassBasisText(i.carcassBasis)}</p>:<p>Carcass basis was not recorded on this earlier invoice.</p>}{i.payment?<p>Recorded payment: {i.payment.method} · {i.payment.method==='cash'?'paper official-receipt reference':'stored receipt reference'} {i.payment.receiptReference} · {currency(i.payment.amountCents)} · recorded {manilaTime(i.payment.recordedAt)}</p>:i.payment_status==='Paid'?<p role="alert">Payment reference details unavailable; refresh and review.</p>:<p>No cash payment recorded.</p>}<p className="text-sm">AINV is an internal bill reference, not an official receipt.<br />The paper receipt number is recorded separately.<br />This page does not process payments.</p><MunicipalInvoiceOversight invoiceId={i.id} onReconciled={invoice=>setInvoices(rows=>rows.map(row=>row.id===invoice.id?{...row,...invoice}:row))}/></article>)}
-  </>}
-  {!busy&&!error&&mode==='delivery'&&<><h3 className="font-bold">Authorized delivery assignments</h3><p className="text-sm">Refresh after mobile activity. Driver positions refresh separately.</p>{!deliveries.length&&<p>No authorized assignments on this page. Animal records do not create an assignment.</p>}
-   {deliveries.map(d=><article className="rounded-xl border p-5" key={d.id}><h4 className="font-bold">{d.vendorName} · {d.animalIdentifier}</h4>{d.syntheticOnly&&<p>Synthetic rehearsal assignment</p>}<p>Owning business {d.vendorBusinessId} · invoiced animal revision {d.animalRevision}</p><p>Destination: {d.delivery.destination}</p><p className="text-sm">Open location updates to compare the verified stall pin and last shared position.<br />Missing pins stay as text only.</p><p>Status: {(completedIds.has(d.id)?'delivered':d.delivery.status).replace(/_/g,' ')} · assigned {manilaTime(d.delivery.assignedAt)}</p>{d.delivery.notes&&<p>Delivery confirmation: {d.delivery.notes}</p>}
-    {d.meatDetails?<div className="my-3"><p>{d.meatDetails.species} · measured live weight {d.meatDetails.weightGrams/1000} kg · weighed {manilaTime(d.meatDetails.weighedAt)}</p><p>{CALCULATED_CARCASS_LABEL}: {d.meatDetails.carcassEstimate.weightGrams/1000} kg · not scale-measured</p>{d.meatDetails.carcassWeight?<p>{MEASURED_CARCASS_LABEL}: {d.meatDetails.carcassWeight.weightGrams/1000} kg · weighed {manilaTime(d.meatDetails.carcassWeight.weighedAt)}</p>:<p>No scale measurement recorded; the calculated weight applies.</p>}{d.meatDetails.carcassWeightSelection.requiresReview&&<p role="alert">Historical carcass measurement requires revision review before use.</p>}</div>:<p className="my-3">{d.meatDetailsMessage}</p>}
-    {settings?.canReadTracking&&(trackingId===d.id?<DeliveryTrackingPanel invoiceId={d.id} deliveryCompleted={completedIds.has(d.id)} onCompleted={markCompleted} onClose={()=>setTrackingId(null)}/>:<button className="btn-secondary" onClick={()=>setTrackingId(d.id)}>{completedIds.has(d.id)?'View destination/drop-off pins':'View authorized last reported location'}</button>)}
-   </article>)}
-  </>}
+  {!workspace&&<nav aria-label="Operations workspaces" className="flex gap-3"><button className="btn-secondary" disabled={busy} onClick={()=>setMode('billing')}>Billing</button><button className="btn-secondary" disabled={busy} onClick={()=>setMode('delivery')}>Delivery</button></nav>}
+  <Toolbar description={mode==='billing'?'Bills, balances and recorded payments. Refresh after mobile activity.':'Assignments, destinations and shared positions. Driver positions refresh separately.'}>
+   <button className="btn-secondary" disabled={busy} onClick={()=>void load()}>Refresh {mode === 'billing' ? 'invoices' : 'deliveries'}</button>
+   {mode==='billing'&&<Link className="btn-secondary" to="/invoice-history">All invoice records</Link>}
+  </Toolbar>
+  {busy&&<p role="status">Loading {mode} workspace…</p>}{error&&<Note tone="danger" role="alert">{error}</Note>}
+  {!busy&&!error&&mode==='billing'&&<section className="record-list" aria-label="Invoices on this page">
+   <div className="record-list-head"><h3>Invoices on this page</h3><p>{invoices.length} shown</p></div>
+   {!invoices.length&&<p>No animal invoices on this page. Animal records are not invoice history.</p>}
+   {invoices.map(i=><RecordCard key={i.id} label={`Invoice ${i.vendor_name} ${i.animalIdentifier}`} title={`${i.vendor_name} · ${i.animalIdentifier}`} subtitle={`Issued ${dayText(i.date_issued)} · due ${dayText(i.due_date)}`}
+     badges={<>{paymentBadge(paymentState(i))}{i.syntheticOnly&&<Badge tone="info">Synthetic rehearsal invoice</Badge>}</>}>
+    <Fields rows={[['Total',currency(i.totalCents)],['Recorded paid',currency(i.paidCents)],['Balance',currency(i.balanceCents)],
+     ['Weight basis at issue',i.carcassBasis?carcassBasisText(i.carcassBasis):'Not recorded on this earlier invoice.'],
+     ['Payment',i.payment?`${i.payment.method==='cash'?'Cash':i.payment.method} · ${i.payment.method==='cash'?'paper official-receipt reference':'stored receipt reference'} ${i.payment.receiptReference} · ${currency(i.payment.amountCents)} · ${manilaTime(i.payment.recordedAt)}`:i.payment_status==='Paid'?<span role="alert">Payment reference details unavailable; refresh and review.</span>:'No cash payment recorded.']]}/>
+    <Note>AINV is an internal bill reference, not an official receipt. The paper receipt is recorded separately; this page takes no payments.</Note>
+    <MoreDetails label="Bill reference, revision and fee snapshot"><Fields className="is-single" rows={[['Internal bill reference (AINV)',i.id],['Owning business',`${i.vendor_name} · ${i.vendor_id}`],['Invoiced animal revision',String(i.animalRevision)],
+     ['Recorded fee schedule',i.feeScheduleSnapshot?`Version ${i.feeScheduleSnapshot.version} · Corral ${currency(i.feeScheduleSnapshot.corralCents)} · Delivery ${currency(i.feeScheduleSnapshot.deliveryCents)} · Inspection ${currency(i.feeScheduleSnapshot.inspectionCents)} · Facility ${currency(i.feeScheduleSnapshot.facilityCents)}. Stored at issue; current rates never recalculate it.`:'Historical fee snapshot unavailable; stored invoice amounts are unchanged.']]}/></MoreDetails>
+    <MunicipalInvoiceOversight invoiceId={i.id} onReconciled={invoice=>setInvoices(rows=>rows.map(row=>row.id===invoice.id?{...row,...invoice}:row))}/>
+   </RecordCard>)}
+  </section>}
+  {!busy&&!error&&mode==='delivery'&&<section className="record-list" aria-label="Authorized delivery assignments">
+   <div className="record-list-head"><h3>Authorized delivery assignments</h3><p>{deliveries.length} shown</p></div>
+   {!deliveries.length&&<p>No authorized assignments on this page. Animal records do not create an assignment.</p>}
+   {deliveries.map(d=><RecordCard key={d.id} label={`Delivery ${d.vendorName} ${d.animalIdentifier}`} title={`${d.vendorName} · ${d.animalIdentifier}`}
+     badges={<>{statusBadge(deliveryStatus(d))}{d.syntheticOnly&&<Badge tone="info">Synthetic rehearsal assignment</Badge>}</>}>
+    <Fields rows={[['Destination',d.delivery.destination],['Status',`${deliveryStatus(d).replace(/_/g,' ')} · assigned ${manilaTime(d.delivery.assignedAt)}`],d.delivery.notes?['Delivery confirmation',d.delivery.notes]:null,
+     ...(d.meatDetails?[['Live weight',<>{kg(d.meatDetails.weightGrams)} <span className="field-note">{d.meatDetails.species} · weighed {manilaTime(d.meatDetails.weighedAt)}</span></>],[CALCULATED_CARCASS_LABEL,<>{kg(d.meatDetails.carcassEstimate.weightGrams)} <span className="field-note">not scale-measured</span></>],
+       [MEASURED_CARCASS_LABEL,d.meatDetails.carcassWeight?<>{kg(d.meatDetails.carcassWeight.weightGrams)} <span className="field-note">weighed {manilaTime(d.meatDetails.carcassWeight.weighedAt)}</span></>:'None recorded; the calculated weight applies.']] as Row[]:[['Meat details',d.meatDetailsMessage??'Unavailable']] as Row[])]}/>
+    {d.meatDetails?.carcassWeightSelection.requiresReview&&<Note tone="warning" role="alert">Historical carcass measurement requires revision review before use.</Note>}
+    <MoreDetails label="Owner and revision"><Fields className="is-single" rows={[['Owning business',`${d.vendorName} · ${d.vendorBusinessId}`],['Invoiced animal revision',String(d.animalRevision)],['Assignment reference',d.id]]}/></MoreDetails>
+    {settings?.canReadTracking&&(trackingId===d.id?<DeliveryTrackingPanel invoiceId={d.id} deliveryCompleted={completedIds.has(d.id)} onCompleted={markCompleted} onClose={()=>setTrackingId(null)}/>:<div className="record-actions"><button className="btn-secondary" onClick={()=>setTrackingId(d.id)}>{completedIds.has(d.id)?'View destination/drop-off pins':'View authorized last reported location'}</button><span className="record-sub">Compares the verified stall pin with the last shared position. Missing pins stay as text.</span></div>)}
+   </RecordCard>)}
+  </section>}
   {!busy&&!error&&cursor&&<button className="btn-secondary" onClick={()=>void load(cursor)}>Load more {mode==='billing'?'invoices':'assignments'}</button>}
  </div>;
 }
