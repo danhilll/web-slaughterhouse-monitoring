@@ -697,3 +697,54 @@ button, input, select, textarea {
 }
 /* On phones the map spans the delivery card's padding too (tracking panel 1rem + card 1.25rem). */
 @media (max-width:640px) { .tracking-map { margin-inline:-2.25rem; border-radius:0; border-inline:0; } .delivery-map-frame { height:min(62vh,520px); } }
+
+/* Shared record presentation (src/ui/RecordParts.tsx). Hierarchy and whitespace, not smaller type. */
+.page-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.75rem 1rem; padding:1rem 1.25rem; border:1px solid var(--line); border-radius:1rem; background:var(--surface); color:var(--ink); }
+.page-toolbar-text { color:var(--muted); line-height:1.5; max-width:62ch; }
+.page-toolbar-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.record-list { display:grid; gap:1rem; }
+.record-list-head { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:.25rem 1rem; }
+.record-list-head h2, .record-list-head h3 { font-size:1.05rem; font-weight:700; }
+.record-list-head p { color:var(--muted); font-size:.9rem; }
+.record-card { display:grid; gap:.9rem; padding:1.25rem; border:1px solid var(--line); border-radius:1rem; background:var(--surface); color:var(--ink); min-width:0; overflow-wrap:anywhere; }
+.record-head { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:.5rem 1rem; }
+.record-title { min-width:0; }
+.record-title h3, .record-title h4 { font-size:1.05rem; font-weight:700; line-height:1.35; }
+.record-sub { margin-top:.15rem; color:var(--muted); }
+.record-badges { display:flex; flex-wrap:wrap; gap:.4rem; }
+.record-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.badge { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .6rem; border-radius:999px; font-size:.8rem; font-weight:650; white-space:nowrap; background:color-mix(in srgb,var(--muted) 14%,var(--surface)); color:var(--ink); }
+.badge-good { background:color-mix(in srgb,#0ca30c 15%,var(--surface)); color:#0b5a0b; }
+.badge-warning { background:color-mix(in srgb,#fab219 26%,var(--surface)); color:#6b3a00; }
+.badge-danger { background:color-mix(in srgb,#d03b3b 15%,var(--surface)); color:#8f1d1d; }
+.badge-info { background:color-mix(in srgb,#2a78d6 14%,var(--surface)); color:#174a86; }
+.dark .badge-good { color:#7ee07e; } .dark .badge-warning { color:#ffd27a; } .dark .badge-danger { color:#ff9c9c; } .dark .badge-info { color:#9cc4f5; }
+.fields { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr)); gap:.85rem 1.5rem; align-items:start; }
+.field.is-wide { grid-column:1/-1; }
+.fields.is-single { grid-template-columns:minmax(0,1fr); }
+.field { display:grid; gap:.15rem; min-width:0; align-content:start; }
+.field dt { font-size:.8rem; font-weight:600; color:var(--muted); }
+.field dd { margin:0; line-height:1.45; font-variant-numeric:tabular-nums; }
+.note { display:flex; align-items:flex-start; gap:.45rem; padding:.6rem .8rem; border-radius:.7rem; line-height:1.45; background:color-mix(in srgb,#2a78d6 9%,var(--surface)); }
+.note > svg { flex:none; margin-top:.2rem; }
+.note-warning { background:color-mix(in srgb,#fab219 18%,var(--surface)); }
+.note-danger { background:color-mix(in srgb,#d03b3b 12%,var(--surface)); }
+.note-good { background:color-mix(in srgb,#0ca30c 11%,var(--surface)); }
+.note-neutral { background:color-mix(in srgb,var(--muted) 10%,var(--surface)); }
+.more-details { border-top:1px solid var(--line); padding-top:.6rem; }
+.more-details > summary { cursor:pointer; min-height:40px; display:flex; align-items:center; gap:.4rem; font-weight:600; color:var(--ink); list-style:none; }
+.more-details > summary::-webkit-details-marker { display:none; }
+.more-details > summary::before { content:''; width:.45rem; height:.45rem; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(-45deg); transition:transform .15s; margin-right:.25rem; }
+.more-details[open] > summary::before { transform:rotate(45deg); }
+.more-details > summary:focus-visible { outline:2px solid #2563eb; outline-offset:2px; border-radius:.4rem; }
+.more-details-body { display:grid; gap:.75rem; padding:.5rem 0 .25rem; }
+.subsection { display:grid; gap:.75rem; padding:1rem; border-radius:.85rem; background:var(--canvas); border:1px solid var(--line); }
+.subsection > h4, .subsection > h5 { font-weight:700; }
+@media (max-width:640px) { .record-card { padding:1rem; } .page-toolbar { padding:.9rem 1rem; } .fields { grid-template-columns:repeat(auto-fill,minmax(min(100%,8.5rem),1fr)); } }
+.organ-choice { display:grid; gap:.5rem; justify-items:start; }
+.organ-choice > dl { width:100%; }
+.animals-intro { align-items:flex-start; }
+.directory-search { flex:1 1 18rem; font-weight:600; }
+.access-steps { margin-top:1rem; padding-left:1.25rem; list-style:decimal; display:grid; gap:.35rem; color:var(--muted); line-height:1.5; }
+.subsection .record-head h4 { font-weight:700; }
+.field-note { display:block; margin-top:.1rem; color:var(--muted); font-size:.85rem; line-height:1.4; }
