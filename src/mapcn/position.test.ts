@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseMapPoint,tileRequest,straightLineMeters,distanceText} from './position.ts';
+import {parseMapPoint,tileRequest,straightLineMeters,distanceText,parseRendererMessage,markerBounds} from './position.ts';
 test('numeric position only; no identity fields cross renderer boundary',()=>{
  const p={latitude:14.123,longitude:121.123,accuracyMeters:25};
  assert.deepEqual(parseMapPoint(p),p);
@@ -34,4 +34,14 @@ test('straight-line distance and its text', () => {
  assert.equal(Math.round(straightLineMeters({latitude:0,longitude:0},{latitude:0,longitude:1})/1000), 111);
  assert.equal(straightLineMeters({latitude:14.6,longitude:121},{latitude:14.6,longitude:121}), 0);
  assert.equal(distanceText(437), '440 m'); assert.equal(distanceText(1234), '1.2 km'); assert.equal(distanceText(23456), '23 km');
+});
+
+test('renderer message accepts only a light or dark theme beside valid markers', () => {
+ const markers={position:null,destination:{latitude:1,longitude:2}};
+ assert.deepEqual(parseRendererMessage({...markers,theme:'dark'}),{markers,theme:'dark'});
+ assert.deepEqual(parseRendererMessage(markers),{markers,theme:'light'});
+ assert.equal(parseRendererMessage({...markers,theme:'sepia'}),null);
+ assert.equal(parseRendererMessage({...markers,theme:'dark',extra:1}),null);
+ assert.deepEqual(markerBounds([{latitude:1,longitude:5},{latitude:3,longitude:2}]),[[2,1],[5,3]]);
+ assert.equal(markerBounds([]),null);
 });

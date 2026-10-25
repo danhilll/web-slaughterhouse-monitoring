@@ -663,10 +663,37 @@ button, input, select, textarea {
 .dark .dash-pill.is-warning { color:#fab219; }
 .dash-mini-stats small { font-size:.72rem; color:var(--d-muted); }
 
-/* Delivery tracking: an open map gets its own full-width card above the details, instead of sharing the text column. */
-.tracking-layout { display:grid; gap:1.25rem; margin-top:.75rem; }
-.tracking-info { min-width:0; }
-.tracking-map { order:-1; min-width:0; border:1px solid var(--line); border-radius:.9rem; padding:.5rem; background:var(--surface); }
-.delivery-map-frame { display:block; height:clamp(460px,66vh,720px); }
+/* Delivery tracking (Google Maps-style): a large map with a compact details panel. Beside each other when the
+   panel is wide enough (container query), stacked map-first when narrow. Light/dark follow the app tokens. */
+.tracking-panel { container-type:inline-size; border:1px solid var(--line); border-radius:1rem; padding:1rem; background:var(--surface); color:var(--ink); }
+.tracking-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem .75rem; }
+.tracking-head-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.tracking-layout { display:grid; gap:1rem; margin-top:.75rem; }
+.tracking-layout.has-map { grid-template-areas:"map" "summary"; }
+.tracking-map { grid-area:map; min-width:0; border-radius:.9rem; overflow:hidden; border:1px solid var(--line); background:var(--canvas); }
+.delivery-map-frame { display:block; width:100%; border:0; height:clamp(380px,62vh,560px); }
+.tracking-summary { grid-area:summary; min-width:0; border:1px solid var(--line); border-radius:.9rem; background:var(--surface); }
+.tracking-summary > summary { display:flex; align-items:center; gap:.4rem; min-height:44px; padding:.5rem .9rem; cursor:pointer; font-weight:650; list-style:none; }
+.tracking-summary > summary::-webkit-details-marker { display:none; }
+.tracking-summary > summary::before { content:''; width:.5rem; height:.5rem; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(-45deg); transition:transform .15s; margin-right:.35rem; }
+.tracking-summary[open] > summary::before { transform:rotate(45deg); }
+.tracking-summary > summary:focus-visible { outline:2px solid #2563eb; outline-offset:-2px; border-radius:.9rem; }
+.tracking-summary-hint { font-weight:500; color:var(--muted); }
+.tracking-facts { display:grid; gap:.8rem; padding:0 .9rem .9rem; }
+.tracking-fact { display:grid; gap:.25rem; padding-top:.7rem; border-top:1px solid var(--line); }
+.tracking-fact:first-child { border-top:0; padding-top:0; }
+.tracking-key { display:flex; align-items:center; gap:.45rem; font-size:.75rem; font-weight:650; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+.tracking-dot { width:.7rem; height:.7rem; border-radius:999px; flex:none; }
+.tracking-dot.is-car { background:#17432c; box-shadow:0 0 0 2px var(--surface),0 0 0 3px #17432c55; }
+.tracking-dot.is-destination { background:#dc2626; }
+.tracking-dot.is-dropoff { background:#2563eb; }
+.tracking-small-button { justify-self:start; margin-top:.25rem; }
+.tracking-notes { display:grid; gap:.35rem; color:var(--muted); }
+@container (min-width: 820px) {
+  .tracking-layout.has-map { grid-template-columns:minmax(260px,320px) minmax(0,1fr); grid-template-areas:"summary map"; align-items:start; }
+  .tracking-layout.has-map .delivery-map-frame { height:clamp(520px,72vh,760px); }
+  .tracking-layout.has-map .tracking-summary { max-height:clamp(520px,72vh,760px); overflow:auto; }
+  .tracking-layout.has-map .tracking-summary > summary { cursor:default; }
+}
 /* On phones the map spans the delivery card's padding too (tracking panel 1rem + card 1.25rem). */
-@media (max-width:640px) { .tracking-map { margin-inline:-2.25rem; border-radius:0; border-inline:0; padding:.25rem 0; } .delivery-map-frame { height:600px; border-radius:0; } }
+@media (max-width:640px) { .tracking-map { margin-inline:-2.25rem; border-radius:0; border-inline:0; } .delivery-map-frame { height:min(62vh,520px); } }

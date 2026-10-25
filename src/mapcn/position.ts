@@ -40,3 +40,18 @@ export function straightLineMeters(a:{latitude:number;longitude:number},b:{latit
  return 2*6371008.8*Math.asin(Math.min(1,Math.sqrt(h)));
 }
 export const distanceText=(m:number)=>m<1000?`${Math.round(m/10)*10} m`:`${(m/1000).toFixed(m<10000?1:0)} km`;
+
+export type MapTheme='light'|'dark';
+/** Renderer message: the marker payload, optionally with a display theme. Any other key or value is rejected. */
+export function parseRendererMessage(value:unknown):{markers:MapMarkers;theme:MapTheme}|null{
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const {theme,...rest}=value as Record<string,unknown>;
+ if(theme!==undefined&&theme!=='light'&&theme!=='dark')return null;
+ const markers=parseMapMarkers(rest);
+ return markers?{markers,theme:theme==='dark'?'dark':'light'}:null;
+}
+/** Bounds with padding for fitting every marker; null when there is nothing to fit. */
+export function markerBounds(points:{latitude:number;longitude:number}[]):[[number,number],[number,number]]|null{
+ if(!points.length)return null;
+ return [[Math.min(...points.map(p=>p.longitude)),Math.min(...points.map(p=>p.latitude))],[Math.max(...points.map(p=>p.longitude)),Math.max(...points.map(p=>p.latitude))]];
+}

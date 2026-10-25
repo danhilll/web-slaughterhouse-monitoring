@@ -1,6 +1,29 @@
-html,body{margin:0;font:13px system-ui;color:#172033;background:#fff}main{padding:4px}.mapcn-host{height:245px;position:relative}.mapcn-host>div{height:100%;width:100%;position:relative}.attribution{margin:4px 0}.attribution a{color:#14532d;text-decoration:underline}p{margin:4px 0}
-
-html,body,#root,main{box-sizing:border-box;height:100%}main{display:flex;flex-direction:column;overflow:auto}.mapcn-host{flex:1 1 0;min-height:120px;height:auto}main>p{flex:0 0 auto}
-
-.map-glyph{display:block;line-height:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}.map-legend{list-style:none;margin:4px 0;padding:0;flex:0 0 auto}.map-legend li{display:flex;align-items:center;gap:6px;margin:3px 0}.map-legend svg{flex:0 0 auto}
-.route-key{display:inline-block;width:20px;height:0;border-top:2px dashed #17432c;flex:0 0 auto}
+/* Map chrome tokens. Tiles are the same OSM raster in both themes; only floating controls, key and banners change. */
+:root{--chrome:#ffffff;--chrome-ink:#1f2933;--chrome-muted:#52606d;--chrome-line:rgba(15,23,42,.14);--chrome-hover:#f1f5f9;--link:#14532d;--focus:#2563eb;--error:#b42318}
+:root[data-theme="dark"]{--chrome:#292522;--chrome-ink:#f3ede9;--chrome-muted:#cbbfb7;--chrome-line:rgba(255,255,255,.16);--chrome-hover:#3a3430;--link:#9ee6b0;--focus:#7fb2ff;--error:#ff8a80;color-scheme:dark}
+html,body,#root,main{box-sizing:border-box;height:100%;margin:0}
+html,body{font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--chrome-ink);background:var(--chrome)}
+p{margin:0}
+.mapcn-host{position:relative;height:100%;width:100%;overflow:hidden}.mapcn-host>div:first-child{height:100%;width:100%;position:relative}
+.map-glyph{display:block;line-height:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+/* Floating controls (top right): 40px targets with visible focus. */
+.map-controls{position:absolute;top:12px;right:12px;z-index:3;display:flex;flex-direction:column;gap:8px}
+.map-control-group{display:flex;flex-direction:column;background:var(--chrome);border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.25);overflow:hidden}
+.map-control-group button{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--chrome-ink);cursor:pointer}
+.map-control-group button+button{border-top:1px solid var(--chrome-line)}
+.map-control-group button:hover{background:var(--chrome-hover)}
+.map-control-group button:focus-visible,.map-banner button:focus-visible,.attribution a:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+/* Compact key (bottom left) and always-visible attribution (bottom right). */
+.map-legend{position:absolute;left:12px;bottom:12px;z-index:2;list-style:none;margin:0;padding:8px 10px;max-width:min(320px,calc(100% - 24px));background:var(--chrome);color:var(--chrome-ink);border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.25);display:grid;gap:4px;font-size:12px}
+.map-legend li{display:flex;align-items:center;gap:7px}.map-legend svg{flex:0 0 auto}
+.route-key{display:inline-block;width:18px;height:0;border-top:2px dashed #17432c;flex:0 0 auto}
+:root[data-theme="dark"] .route-key{border-top-color:#7fd19b}
+.attribution{position:absolute;right:0;bottom:0;z-index:2;padding:2px 6px;font-size:11px;background:color-mix(in srgb,var(--chrome) 88%,transparent);color:var(--chrome-muted);border-top-left-radius:6px}
+.attribution a{color:var(--link);text-decoration:underline}
+/* Loading and tile-error banner (top centre); markers stay usable beneath. */
+.map-banner{position:absolute;top:12px;left:12px;right:64px;z-index:3;margin:0 auto;max-width:420px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;background:var(--chrome);color:var(--chrome-ink);border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.map-banner.is-error{border-left:4px solid var(--error)}
+.map-banner button{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--chrome-line);border-radius:8px;background:var(--chrome);color:var(--chrome-ink);font:inherit;font-weight:600;cursor:pointer}
+.map-empty{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;padding:16px;text-align:center}
+.map-empty .attribution{position:static;background:transparent}
+@media (max-width:480px){.map-legend{font-size:11px;padding:6px 8px;bottom:22px}.map-controls{top:8px;right:8px}}
