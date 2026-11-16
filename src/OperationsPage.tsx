@@ -10,6 +10,7 @@ import {CALCULATED_CARCASS_LABEL,MEASURED_CARCASS_LABEL,estimateCarcassWeight} f
 import {carcassBasisText,type CarcassBasis} from './carcassBasis';
 import { DeliveryTrackingPanel } from './DeliveryTrackingPanel';
 import { billingSearchTerms, matchesBillingSearch } from './billingSearch';
+import { matchesDeliverySearch } from './recordSearch';
 import { Download, ExternalLink } from 'lucide-react';
 import { completeCursorList } from './monitoringMetrics';
 import { validateFeedbackRows, type FeedbackRow } from './deliveryFeedback';
@@ -32,20 +33,23 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
  const [pdf,setPdf]=useState<{id:string;busy:boolean;error:string}|null>(null);
  const epoch=useRef(0),controller=useRef<AbortController|null>(null);
  const json=async(url:string,signal?:AbortSignal)=>{const r=await apiFetch(url,{signal});const b=await r.json();if(!r.ok)throw Error(b.message||'Workspace unavailable.');return b;};
- // Search covers loaded pages only. This loads the rest so a search can cover every invoice.
- const loadAllBilling=async()=>{
+ // Search covers loaded pages only. This loads the rest so a search can cover every invoice or delivery.
+ const loadAll=async()=>{
   if(!cursor||loadingAll)return;
+  const billing=mode==='billing',noun=billing?'invoice':'delivery';
   controller.current?.abort();const abort=new AbortController();controller.current=abort;const current=++epoch.current;setLoadingAll(true);setLoadAllError('');
-  try{let next:string|null=cursor;const added:Invoice[]=[],seen=new Set(invoices.map(i=>i.id)),cursors=new Set<string>();
+  try{let next:string|null=cursor;const added:(Invoice|Delivery)[]=[],seen=new Set<string>((billing?invoices:deliveries).map(i=>i.id)),cursors=new Set<string>();
    while(next){
-    if(cursors.has(next))throw Error('The invoice cursor did not advance. Refresh to retry.');cursors.add(next);
-    const list=await json('/api/operations/billing/invoices?cursor='+encodeURIComponent(next),abort.signal);if(current!==epoch.current)return;
-    list.items.forEach(validateBillingAmounts);
-    for(const item of list.items as Invoice[]){if(seen.has(item.id))throw Error('The invoice list changed while loading. Refresh to retry.');seen.add(item.id);added.push(item);}
+    if(cursors.has(next))throw Error(`The ${noun} cursor did not advance. Refresh to retry.`);cursors.add(next);
+    const list=await json((billing?'/api/operations/billing/invoices':'/api/operations/deliveries')+'?cursor='+encodeURIComponent(next),abort.signal);if(current!==epoch.current)return;
+    if(billing)list.items.forEach(validateBillingAmounts);
+    for(const item of list.items as (Invoice|Delivery)[]){if(seen.has(item.id))throw Error(`The ${noun} list changed while loading. Refresh to retry.`);seen.add(item.id);added.push(item);}
     next=list.nextCursor;
    }
-   setInvoices(old=>[...old,...added]);setCursor(null);
-  }catch(e){if(current===epoch.current&&!abort.signal.aborted)setLoadAllError((e as Error).message+' Invoices already shown are unchanged.');}
+   if(billing)setInvoices(old=>[...old,...added as Invoice[]]);
+   else{const rows=added as Delivery[];setCompletedIds(previous=>{const next=new Set(previous);for(const item of rows)if(item.delivery.status==='delivered')next.add(item.id);return next;});setDeliveries(old=>[...old,...rows]);}
+   setCursor(null);
+  }catch(e){if(current===epoch.current&&!abort.signal.aborted)setLoadAllError((e as Error).message+(billing?' Invoices already shown are unchanged.':' Deliveries already shown are unchanged.'));}
   finally{if(current===epoch.current)setLoadingAll(false);}
  };
  const exportPdf=async(invoice:Invoice,open:boolean)=>{
@@ -79,9 +83,10 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
   }catch(e){if(current===epoch.current&&!abort.signal.aborted){setError((e as Error).message);setInvoices([]);setDeliveries([]);setCursor(null);setTrackingId(null);}}
   finally{if(current===epoch.current)setBusy(false);}
  };
- useEffect(()=>{setTrackingId(null);setInvoices([]);setDeliveries([]);setCursor(null);void load();return()=>{epoch.current++;controller.current?.abort();};},[mode]);
+ useEffect(()=>{setTrackingId(null);setInvoices([]);setDeliveries([]);setCursor(null);setQuery('');void load();return()=>{epoch.current++;controller.current?.abort();};},[mode]);
  useEffect(()=>{if(workspace)setMode(workspace);},[workspace]);
  const deliveryStatus=(d:Delivery)=>completedIds.has(d.id)?'delivered':d.delivery.status;
+ const shownDeliveries=deliveries.filter(d=>matchesDeliverySearch(d,deliveryStatus(d),terms));
  const statusBadge=(status:string)=>status==='delivered'?<Badge tone="good">Delivered</Badge>:status==='in_transit'?<Badge tone="info">In transit</Badge>:<Badge>{status.replace(/_/g,' ').replace(/^./,c=>c.toUpperCase())}</Badge>;
  const kg=(grams:number)=>`${grams/1000} kg`;
  return <div className="space-y-5">
@@ -92,7 +97,7 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
   </Toolbar>
   {busy&&<p role="status">Loading {mode} workspace…</p>}{error&&<Note tone="danger" role="alert">{error}</Note>}
   {!busy&&!error&&mode==='billing'&&<div className="page-toolbar"><label className="directory-search">Search invoices<input className="input mt-1 w-full" type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Vendor, animal, AINV, receipt reference, date or status" /></label>
-   {cursor&&<div className="page-toolbar-actions"><button className="btn-secondary" disabled={loadingAll} onClick={()=>void loadAllBilling()}>{loadingAll?'Loading all invoices…':'Load all invoices to search'}</button></div>}</div>}
+   {cursor&&<div className="page-toolbar-actions"><button className="btn-secondary" disabled={loadingAll} onClick={()=>void loadAll()}>{loadingAll?'Loading all invoices…':'Load all invoices to search'}</button></div>}</div>}
   {!busy&&!error&&mode==='billing'&&terms.length>0&&cursor&&<Note tone="warning" role="status">Searching the {invoices.length} invoices loaded so far. More pages exist; load all invoices to search everything.</Note>}
   {loadAllError&&<Note tone="danger" role="alert">{loadAllError}</Note>}
   {!busy&&!error&&mode==='billing'&&<section className="record-list" aria-label="Invoices on this page">
@@ -117,10 +122,14 @@ export function OperationsPage({workspace}:{workspace?:Mode}) {
     <MunicipalInvoiceOversight invoiceId={i.id} onReconciled={invoice=>setInvoices(rows=>rows.map(row=>row.id===invoice.id?{...row,...invoice}:row))}/>
    </RecordCard>)}
   </section>}
+  {!busy&&!error&&mode==='delivery'&&<div className="page-toolbar"><label className="directory-search">Search deliveries<input className="input mt-1 w-full" type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Vendor, animal, destination, status, reference or date" /></label>
+   {cursor&&<div className="page-toolbar-actions"><button className="btn-secondary" disabled={loadingAll} onClick={()=>void loadAll()}>{loadingAll?'Loading all deliveries…':'Load all deliveries to search'}</button></div>}</div>}
+  {!busy&&!error&&mode==='delivery'&&terms.length>0&&cursor&&<Note tone="warning" role="status">Searching the {deliveries.length} deliveries loaded so far. More pages exist; load all deliveries to search everything.</Note>}
   {!busy&&!error&&mode==='delivery'&&<section className="record-list" aria-label="Authorized delivery assignments">
-   <div className="record-list-head"><h3>Authorized delivery assignments</h3><p>{deliveries.length} shown</p></div>
+   <div className="record-list-head"><h3>{terms.length?'Matching deliveries':'Authorized delivery assignments'}</h3><p>{terms.length?`${shownDeliveries.length} of ${deliveries.length} loaded match`:`${deliveries.length} shown`}</p></div>
    {!deliveries.length&&<p>No authorized assignments on this page. Animal records do not create an assignment.</p>}
-   {deliveries.map(d=><RecordCard key={d.id} label={`Delivery ${d.vendorName} ${d.animalIdentifier}`} title={`${d.vendorName} · ${d.animalIdentifier}`}
+   {deliveries.length>0&&!shownDeliveries.length&&<p>No loaded deliveries match this search.</p>}
+   {shownDeliveries.map(d=><RecordCard key={d.id} label={`Delivery ${d.vendorName} ${d.animalIdentifier}`} title={`${d.vendorName} · ${d.animalIdentifier}`}
      badges={<>{statusBadge(deliveryStatus(d))}{d.syntheticOnly&&<Badge tone="info">Synthetic rehearsal assignment</Badge>}</>}>
     <Fields rows={[['Destination',d.delivery.destination],['Status',`${deliveryStatus(d).replace(/_/g,' ')} · assigned ${manilaTime(d.delivery.assignedAt)}`],d.delivery.notes?['Delivery confirmation',d.delivery.notes]:null,
      ...(d.meatDetails?[['Live weight',<>{kg(d.meatDetails.weightGrams)} <span className="field-note">{d.meatDetails.species} · weighed {manilaTime(d.meatDetails.weighedAt)}</span></>],[CALCULATED_CARCASS_LABEL,<>{kg(d.meatDetails.carcassEstimate.weightGrams)} <span className="field-note">not scale-measured</span></>],

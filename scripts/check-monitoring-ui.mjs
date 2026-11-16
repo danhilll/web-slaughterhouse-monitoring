@@ -94,9 +94,19 @@ try {
     if(destination==='/billing'){const card=page.getByRole('article',{name:'Invoice Synthetic A TEST-A'});await card.getByRole('heading',{name:'Synthetic A · TEST-A'}).waitFor();
      await card.getByText('AINV is an internal bill reference, not an official receipt.',{exact:false}).waitFor();
      await card.locator('summary',{hasText:'Bill reference, revision and fee snapshot'}).click();await card.getByText(inv.id,{exact:true}).waitFor();}
-    if(destination==='/delivery')await page.getByText('Stall A',{exact:false}).first().waitFor();
+    if(destination==='/delivery'){await page.getByText('Stall A',{exact:false}).first().waitFor();
+     if(label==='desktop'&&!dark){const search=page.getByLabel('Search deliveries');
+      await search.fill('test-a in transit');await page.getByRole('heading',{name:'Matching deliveries'}).waitFor();await page.getByRole('article',{name:'Delivery Synthetic A TEST-A'}).waitFor();await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:path.join(evidence,'search-delivery.png')});
+      await search.fill('no-such-delivery');await page.getByText('No loaded deliveries match this search.',{exact:true}).waitFor();assert.equal(await page.getByRole('article').count(),0,'non-matching deliveries are hidden');
+      await search.fill('');await page.getByRole('heading',{name:'Authorized delivery assignments'}).waitFor();}}
     if(destination==='/users')await page.getByRole('button',{name:'Activate mobile access'}).waitFor();
-    if(destination==='/animals'){await page.getByText('Selected carcass weight',{exact:true}).first().waitFor();await page.getByText('Vendor organ/offal collection',{exact:true}).first().waitFor();assert.equal(await page.getByText(/NaN|undefined/).count(),0,'no unreadable values on animal cards');}
+    if(destination==='/animals'){await page.getByText('Selected carcass weight',{exact:true}).first().waitFor();await page.getByText('Vendor organ/offal collection',{exact:true}).first().waitFor();assert.equal(await page.getByText(/NaN|undefined/).count(),0,'no unreadable values on animal cards');
+     if(label==='desktop'&&!dark){const search=page.getByLabel('Search animals');
+      await search.fill('ear-synthetic awaiting');await page.getByRole('heading',{name:/^1 of \d+ loaded animals match$/}).waitFor();await page.getByRole('heading',{name:'EAR-SYNTHETIC · Pig'}).waitFor();await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:path.join(evidence,'search-animals.png')});
+      await page.getByText('More pages exist; load all animals to search everything.',{exact:false}).waitFor();
+      await page.getByRole('button',{name:'Load all animals to search'}).click();
+      await page.getByText('More pages exist',{exact:false}).waitFor({state:'detached'});assert.equal(await page.getByRole('button',{name:/Load (all|more) animals/}).count(),0,'all animal pages loaded');
+      await search.fill('no-such-animal');await page.getByText('No loaded animals match this search.',{exact:true}).waitFor();await search.fill('');}}
     await noOverflow(destination);
     await shot(`${label}-${dark?'dark':'light'}-${tag(destination)}`);
    }

@@ -1,5 +1,6 @@
 import { dayText } from './displayTime.ts';
 import { paymentState } from './overdue.ts';
+import { normalize, searchTerms } from './searchText.ts';
 
 // Client-side search over invoices already returned to this authorized screen. It never queries
 // the server and never treats a partly loaded register as complete; the page states what was searched.
@@ -8,14 +9,11 @@ export type SearchableInvoice = {
   date_issued: string; due_date: string; payment_status: string; payment?: { receiptReference: string };
 };
 
-const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 // Status words match the displayed status exactly, so "paid" does not also match "Unpaid".
 // Overdue is still unpaid (a flag only), so "unpaid" includes Overdue invoices.
 const statusTerms: Record<string, string[]> = { paid: ['Paid'], unpaid: ['Unpaid', 'Overdue'], overdue: ['Overdue'] };
 
-export function billingSearchTerms(query: string): string[] {
-  return normalize(query).split(' ').filter(Boolean);
-}
+export const billingSearchTerms = searchTerms;
 
 /** Every term must match (AND): vendor, vendor ID, animal, AINV reference, receipt reference, dates or status. */
 export function matchesBillingSearch(invoice: SearchableInvoice, terms: string[], now = new Date()): boolean {

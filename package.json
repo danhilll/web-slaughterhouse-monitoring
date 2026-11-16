@@ -18,7 +18,7 @@
     "check:firebase": "node scripts/check-firebase-connection.js",
     "inspect:firestore": "node scripts/inspect-firestore-shape.js",
     "test:server": "node --test server/*.test.js",
-    "test:lists-ui": "node --experimental-strip-types --test src/listPages.test.ts",
+    "test:lists-ui": "node --experimental-strip-types --test src/listPages.test.ts src/recordSearch.test.ts",
     "test:tracking-ui": "node --experimental-strip-types --test src/trackingPolling.test.ts",
     "test:billing-ui": "node --experimental-strip-types --test src/billingSearch.test.ts src/billingRecordPdf.test.ts",
     "test:carcass-ui":"node --experimental-strip-types --test src/carcassBasis.test.ts",
