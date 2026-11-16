@@ -748,3 +748,12 @@ button, input, select, textarea {
 .access-steps { margin-top:1rem; padding-left:1.25rem; list-style:decimal; display:grid; gap:.35rem; color:var(--muted); line-height:1.5; }
 .subsection .record-head h4 { font-weight:700; }
 .field-note { display:block; margin-top:.1rem; color:var(--muted); font-size:.85rem; line-height:1.4; }
+/* Vendor delivery ratings (read-only). Filled #b45309 keeps >=3:1 on white; the rating is always also given as text. */
+.feedback-stars { display:inline-flex; gap:2px; vertical-align:-2px; color:var(--muted); }
+.feedback-stars .is-filled { color:#b45309; fill:#b45309; }
+.dark .feedback-stars .is-filled { color:#fbbf24; fill:#fbbf24; }
+.feedback-comment { white-space:pre-line; overflow-wrap:anywhere; }
+.dash-rating { display:flex; flex-wrap:wrap; gap:1.5rem 2.5rem; align-items:flex-start; }
+.dash-rating-dist { flex:1 1 16rem; display:grid; gap:.4rem; }
+.dash-rating-dist li { display:grid; grid-template-columns:3.5rem 1fr 2.5rem; align-items:center; gap:.6rem; font-size:.85rem; }
+.dash-rating-dist .dash-bar-track { margin-top:0; }

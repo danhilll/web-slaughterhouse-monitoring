@@ -2,7 +2,8 @@ import {operationsPolicyApproved,carcassPolicyApproved} from './production-polic
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 
-const features = ['accountManagement','activation','animals','inspection','carcass','billing','payment','delivery','tracking'];
+// feedback: owning-Vendor delivery ratings (2026-11-16 owner decision). Defaults off like every gate.
+const features = ['accountManagement','activation','animals','inspection','carcass','billing','payment','delivery','tracking','feedback'];
 const operationFeatures = ['billing','payment','delivery','tracking'];
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const reject = message => { throw new Error(`Production configuration: ${message}`); };

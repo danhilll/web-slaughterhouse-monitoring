@@ -22,7 +22,7 @@ function component() {
   return load('../src/AnimalsPage.tsx',{
     react:React,'react/jsx-runtime':jsxRuntime,'./api':{apiFetch:()=>{throw Error('No API requests in render tests');}},
     './carcassWeight':load('../src/carcassWeight.ts'),'./animalRegistrationTime':load('../src/animalRegistrationTime.ts'),'../shared/carcassEstimate.js':estimates,
-    './displayTime':load('../src/displayTime.ts'),'./ui/RecordParts':load('../src/ui/RecordParts.tsx',{react:React,'react/jsx-runtime':jsxRuntime,'lucide-react':lucide})
+    './displayTime':load('../src/displayTime.ts'),'./ui/RecordParts':load('../src/ui/RecordParts.tsx',{react:React,'react/jsx-runtime':jsxRuntime,'lucide-react':lucide,'../displayTime':load('../src/displayTime.ts')})
   }).CarcassWeightSummary;
 }
 const animal={weightGrams:85001,revision:2,carcassWeight:null};

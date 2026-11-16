@@ -1,4 +1,5 @@
 import {dropOffReadable,dropOffProjection,validateDropOffPoint} from './drop-off-point.js';
+import {feedbackReadable,feedbackProjection,feedbackListView,validateStoredFeedback,validateFeedbackInput,validRating,validComment} from './delivery-feedback.js';
 import {validCoordinates,validReviewedDestination,validateDestinationPin,pinMatches,destinationProjection,destinationReadable} from './destination-map.js';
 import {billingWriter,inspectorAssigner,requireCarcassBasis,carcassBasis,validateOwnerFees,stallDestination,stallReservationKey} from './owner-workflow-policy.js';
 import { Router } from 'express';
@@ -130,6 +131,32 @@ export function createOperationsStore(getDb, { production = false } = {}) {
         const after={invoiceId:row.id,municipalScopeId:row.municipalScopeId,vendorBusinessId:row.vendor_id,assigneeUid:row.delivery.assigneeUid,latitude:b.latitude,longitude:b.longitude,selectionMethod:b.selectionMethod,selectedAt:at,selectedBy:p.uid,revision};validateDropOffPoint(after,row);
         tx.set(ref,after);tx.create(db().collection('delivery_drop_off_audit').doc(),{invoiceId:row.id,municipalScopeId:row.municipalScopeId,actorUid:p.uid,at,action:before?'drop_off_updated':'drop_off_selected',before,after});return dropOffProjection(row,after,p);
       });
+    },
+    async feedbackRead(value,p,writable){
+      return db().runTransaction(async tx=>{const row=await read(tx,invoice(value));if(!feedbackReadable(row,p))throw fail(404,'Delivery feedback not found.');if(!validInvoice(row))throw fail(503,'Invoice requires review.');const f=await read(tx,db().doc(`delivery_feedback/${row.id}`));if(f)validateStoredFeedback(f,row);return feedbackProjection(row,f,p,writable);});
+    },
+    async feedbackWrite(value,b,p,at){
+      const input=validateFeedbackInput(b);
+      return db().runTransaction(async tx=>{
+        const row=await read(tx,invoice(value));if(!feedbackReadable(row,p))throw fail(404,'Delivery feedback not found.');
+        if(p.role!=='vendor')throw fail(403,'Only the owning Vendor may rate this delivery.');
+        if(!validInvoice(row))throw fail(503,'Invoice requires review.');
+        // Membership is re-read inside the transaction so a just-deactivated Vendor cannot submit.
+        const m=await read(tx,db().doc(`mobile_memberships/${p.uid}`));
+        if(!m||m.status!=='active'||m.role!=='vendor'||m.municipalScopeId!==row.municipalScopeId||m.vendorBusinessId!==row.vendor_id)throw fail(403,'Active Vendor access is required to rate this delivery.');
+        if(row.delivery.status!=='delivered')throw fail(409,'Only a completed delivery can be rated.');
+        const ref=db().doc(`delivery_feedback/${row.id}`),before=await read(tx,ref);
+        if(before)throw fail(409,'This delivery has already been rated. Ratings cannot be changed.');
+        const after={invoiceId:row.id,municipalScopeId:row.municipalScopeId,vendorBusinessId:row.vendor_id,rating:input.rating,comment:input.comment,submittedAt:at,submittedBy:p.uid};
+        validateStoredFeedback(after,row);
+        // Create-if-absent plus audit in one transaction; the invoice and animal are never written.
+        tx.create(ref,after);tx.create(db().collection('delivery_feedback_audit').doc(),{invoiceId:row.id,municipalScopeId:row.municipalScopeId,actorUid:p.uid,at,action:'feedback_submitted',after});
+        return feedbackProjection(row,after,p,false);
+      });
+    },
+    async feedbackList(p,after){
+      let q=db().collection('delivery_feedback').where('municipalScopeId','==',p.municipalScopeId).orderBy(FieldPath.documentId());if(after)q=q.startAfter(after);
+      const rows=await q.limit(26).get();return rows.docs.map(s=>({...s.data(),docId:s.id}));
     },
     async destinationRead(value,p){
       return db().runTransaction(async tx=>{
@@ -354,6 +381,15 @@ export function createOperationsRouter({store,animalStore,enabled=false,getPrinc
   router.get('/invoices/:id/drop-off-point',run(async(req,res)=>{if(Object.keys(req.query).length)throw fail(400,'Unsupported drop-off filter.');const view=await store.dropOffRead(req.params.id,req.principal);view.canUpdate=Boolean(view.canUpdate&&req.operationsEnabled&&(!production||production.features.delivery===true));res.json(view);}));
   router.post('/invoices/:id/drop-off-point',writeGate('delivery'),run(async(req,res)=>{
     const b=body(req,['latitude','longitude','expectedRevision','expectedDropOffRevision','selectionMethod','confirmed']);if(Object.keys(req.query).length||!validCoordinates(b.latitude,b.longitude)||!Number.isSafeInteger(b.expectedDropOffRevision)||b.expectedDropOffRevision<0||!['map_tap','device_location'].includes(b.selectionMethod)||b.confirmed!==true)throw fail(400,'Confirm valid drop-off coordinates, selection method and current revisions.');res.json(await store.dropOffWrite(req.params.id,b,req.principal,now()));
+  }));
+  const feedbackWritable=req=>Boolean(req.operationsEnabled&&(!production||production.features.feedback===true));
+  router.get('/invoices/:id/feedback',run(async(req,res)=>{if(Object.keys(req.query).length)throw fail(400,'Unsupported feedback filter.');res.json(await store.feedbackRead(req.params.id,req.principal,feedbackWritable(req)));}));
+  router.post('/invoices/:id/feedback',writeGate('feedback'),run(async(req,res)=>{res.json(await store.feedbackWrite(req.params.id,req.body,req.principal,now()));}));
+  router.get('/feedback',run(async(req,res)=>{
+    if(req.principal.role!=='admin')throw fail(403,'Municipal monitoring access is required.');
+    const after=query(req,'feedback'),rows=await store.feedbackList(req.principal,after);
+    if(!Array.isArray(rows)||rows.length>26||rows.some(f=>f.docId!==f.invoiceId||!id(f.invoiceId)||f.municipalScopeId!==req.principal.municipalScopeId||!id(f.vendorBusinessId)||!validRating(f.rating)||!validComment(f.comment)||typeof f.submittedAt!=='string'||!Number.isFinite(Date.parse(f.submittedAt))))throw fail(503,'Delivery feedback requires municipal review.');
+    const page=rows.slice(0,25);res.json({items:page.map(feedbackListView),nextCursor:rows.length>25?encode(req.principal,page.at(-1).invoiceId,'feedback'):null});
   }));
   router.get('/invoices/:id/destination-map',run(async(req,res)=>{if(Object.keys(req.query).length)throw fail(400,'Unsupported destination filter.');res.json(await store.destinationRead(req.params.id,req.principal));}));
   router.post('/invoices/:id/destination-map',writeGate('delivery'),run(async(req,res)=>{

@@ -26,9 +26,6 @@ export function MoreDetails({label='More details',children}:{label?:string;child
 /** A short visible note. Warnings stay outside MoreDetails. */
 export function Note({tone='info',children,role}:{tone?:Tone;children:ReactNode;role?:'alert'|'status'}){return <p className={`note note-${tone}`} role={role}>{icons[tone]}<span>{children}</span></p>;}
 export function Toolbar({children,description}:{children:ReactNode;description?:ReactNode}){return <div className="page-toolbar">{description&&<p className="page-toolbar-text">{description}</p>}<div className="page-toolbar-actions">{children}</div></div>;}
-/** A Manila calendar day (YYYY-MM-DD) as "Oct 25, 2026"; unreadable input is shown unchanged. */
-export function dayText(day:unknown):string{
- if(typeof day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(day))return typeof day==='string'&&day?day:'Unavailable';
- const d=new Date(day+'T00:00:00Z');return Number.isFinite(d.getTime())?new Intl.DateTimeFormat('en-PH',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(d):day;
-}
+// Defined in displayTime.ts so plain-Node tests and the PDF export share one formatter.
+export {dayText} from '../displayTime';
 export function paymentBadge(state:'Paid'|'Unpaid'|'Overdue'|null){return state==='Paid'?<Badge tone="good">Paid</Badge>:state==='Overdue'?<Badge tone="warning">Overdue</Badge>:state==='Unpaid'?<Badge>Unpaid</Badge>:<Badge tone="danger">Payment status unavailable</Badge>;}

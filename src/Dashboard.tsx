@@ -7,6 +7,8 @@ import {paymentState} from './overdue';
 import {fetchCompleteList} from './listPages';
 import {completeCursorList,periodBounds,type Period} from './monitoringMetrics';
 import {chartBuckets,kpis,change,animalSeries,moneySeries,feeBreakdown,topVendors,pipeline,recentInvoices,type AnimalRow,type InvoiceRow,type Kpi} from './dashboardData';
+import {ratingSummary,validateFeedbackRows,type FeedbackRow} from './deliveryFeedback';
+import {Stars} from './FeedbackPanel';
 // Read-only municipal Dashboard. Palette validated with the dataviz validator against the
 // card surfaces (#ffffff light, #292522 dark); slots 3-4 are sub-3:1 in light, so the fee
 // breakdown always shows its values as text.
@@ -45,14 +47,15 @@ function Plot({height,children}:{height:number;children:(width:number)=>ReactEle
 }
 export function Dashboard({dark=false}:{dark?:boolean}){
  const [period,setPeriod]=useState<Period>('week'),[reload,setReload]=useState(0);
- const [animals,setAnimals]=useState<AnimalRow[]|null>(null),[invoices,setInvoices]=useState<InvoiceRow[]|null>(null);
+ const [animals,setAnimals]=useState<AnimalRow[]|null>(null),[invoices,setInvoices]=useState<InvoiceRow[]|null>(null),[feedback,setFeedback]=useState<FeedbackRow[]|null>(null);
  const [busy,setBusy]=useState(true),[loaded,setLoaded]=useState(false),[errors,setErrors]=useState<string[]>([]),[updatedAt,setUpdatedAt]=useState<Date|null>(null);
  useEffect(()=>{const abort=new AbortController();setBusy(true);setErrors([]);
   const timeout=setTimeout(()=>{abort.abort();setBusy(false);setErrors(['Loading timed out. Refresh to retry.']);},30000);
-  Promise.allSettled([completeCursorList('/api/animals',apiFetch,abort.signal),fetchCompleteList<InvoiceRow>('/api/invoices',apiFetch,abort.signal)]).then(([a,i])=>{clearTimeout(timeout);if(abort.signal.aborted)return;
+  Promise.allSettled([completeCursorList('/api/animals',apiFetch,abort.signal),fetchCompleteList<InvoiceRow>('/api/invoices',apiFetch,abort.signal),
+   completeCursorList('/api/operations/feedback',apiFetch,abort.signal).then(rows=>validateFeedbackRows(rows))]).then(([a,i,f])=>{clearTimeout(timeout);if(abort.signal.aborted)return;
    // A failed source becomes unavailable instead of keeping numbers that no longer match the other source.
-   setAnimals(a.status==='fulfilled'?a.value as AnimalRow[]:null);setInvoices(i.status==='fulfilled'?i.value:null);
-   const failed:[string,PromiseSettledResult<unknown>][]=[['Animals',a],['Invoices',i]];
+   setAnimals(a.status==='fulfilled'?a.value as AnimalRow[]:null);setInvoices(i.status==='fulfilled'?i.value:null);setFeedback(f.status==='fulfilled'?f.value:null);
+   const failed:[string,PromiseSettledResult<unknown>][]=[['Animals',a],['Invoices',i],['Vendor ratings',f]];
    setErrors(failed.flatMap(([name,r])=>r.status==='rejected'?[`${name} could not load: ${String((r.reason as Error)?.message||r.reason)}`]:[]));
    setBusy(false);setLoaded(true);setUpdatedAt(new Date());});
   return()=>{clearTimeout(timeout);abort.abort();};},[reload]);
@@ -68,6 +71,7 @@ export function Dashboard({dark=false}:{dark?:boolean}){
  const value=(n:number|null,kind:'money'|'count')=>busy&&!loaded?'Loading…':n===null?'Unavailable':kind==='money'?peso(n):count(n);
  const animalsSplit=herd&&!busy?herd.data.reduce((s,d)=>({Pig:s.Pig+(d.Pig??0),Cow:s.Cow+(d.Cow??0)}),{Pig:0,Cow:0}):null;
  const unavailable=(rows:unknown)=>rows===null?<p className="dash-empty" role="status">{busy&&!loaded?'Loading…':'Unavailable until the records load. Refresh to retry.'}</p>:null;
+ const ratings=feedback?ratingSummary(feedback,bounds):null;
  const noHerd=herd&&!herd.data.some(d=>(d.Pig??0)+(d.Cow??0)>0),noCash=cash&&!cash.data.some(d=>(d.Billed??0)>0||(d.Collected??0)>0);
  return <div className={`dash${busy&&loaded?' is-refreshing':''}`} aria-busy={busy}>
   <div className="dash-toolbar">
@@ -127,6 +131,15 @@ export function Dashboard({dark=false}:{dark?:boolean}){
    </ChartCard>
    <ChartCard title="Delivery pipeline" subtitle="Current status of every invoice" wide>
     {unavailable(flow)??<><ol className="dash-pipeline">{([['Awaiting assignment',flow!.counts.awaiting,Clock3],['Assigned',flow!.counts.assigned,UserCheck],['In transit',flow!.counts.in_transit,Truck],['Delivered',flow!.counts.delivered,CheckCircle2]] as const).map(([label,n,Icon])=><li key={label}><Icon size={18} aria-hidden="true"/><b>{count(n)}</b><span>{label}</span></li>)}</ol>{flow!.counts.unknown>0&&<p className="dash-note">{flow!.counts.unknown} invoice{flow!.counts.unknown===1?' has':'s have'} an unrecognised delivery status.</p>}<Link className="dash-link" to="/delivery">Open deliveries →</Link></>}
+   </ChartCard>
+   <ChartCard title="Vendor ratings" subtitle={`Completed deliveries rated ${periodWord} · by rating time · 1 to 5 stars`} wide note={ratings?excludedNote(ratings.excluded):undefined}
+    table={ratings&&ratings.count>0&&<table><thead><tr><th>Stars</th><th>Ratings</th></tr></thead><tbody>{[5,4,3,2,1].map(n=><tr key={n}><td>{n}</td><td>{ratings.distribution[n-1]}</td></tr>)}</tbody></table>}>
+    {unavailable(ratings)??<div className="dash-rating">
+     <div><p className="dash-big">{ratings!.average===null?'Unavailable':`${ratings!.average.toFixed(1)} / 5`}</p>
+      {ratings!.average!==null&&<Stars rating={Math.round(ratings!.average)}/>}
+      <p className="dash-sub">{ratings!.count?`Average of ${count(ratings!.count)} rating${ratings!.count===1?'':'s'} ${periodWord}.`:`No ratings submitted ${periodWord}.`} Rated by the owning Vendor in the mobile app; read-only here.</p></div>
+     {ratings!.count>0&&<ol className="dash-rating-dist" aria-label="Ratings by number of stars">{[5,4,3,2,1].map(n=>{const c=ratings!.distribution[n-1];return <li key={n}><span>{n} star{n===1?'':'s'}</span><div className="dash-bar-track"><span style={{width:`${c?Math.max(2,c/ratings!.count*100):0}%`,background:colors[0]}}/></div><b>{count(c)}</b></li>;})}</ol>}
+    </div>}
    </ChartCard>
   </div>
   <section className="dash-card" aria-label="Recent invoices">

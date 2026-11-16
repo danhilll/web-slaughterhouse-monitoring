@@ -7,7 +7,7 @@ export const INVOICE_COPY_NOTICE = 'Historical record copy; not an official rece
 // Additional printable characters in jsPDF 4.2.1 Helvetica's WinAnsi encoding map.
 const winAnsiExtras = new Set('ŒœŠšŸŽžƒˆ˜–—‘’‚“”„†‡•…‰‹›€™');
 
-function verifyText(label: string, value: string) {
+export function verifyText(label: string, value: string) {
   for (const char of value) {
     const code = char.codePointAt(0)!;
     if (char === '\n' || char === '\r' || code >= 32 && code <= 126 ||
